@@ -6,6 +6,8 @@ data class Appearance(val palette: Palette = Palette.FOREST, val dark: Boolean =
 
 class SettingsRepository(context: Context) {
     private val prefs = context.getSharedPreferences("appearance", Context.MODE_PRIVATE)
+    fun showWelcome(): Boolean = !prefs.getBoolean("welcome_dismissed", false)
+    fun dismissWelcome() { prefs.edit().putBoolean("welcome_dismissed", true).apply() }
     fun showThumbnails(): Boolean = prefs.getBoolean("show_thumbnails", true)
     fun setShowThumbnails(show: Boolean) { prefs.edit().putBoolean("show_thumbnails", show).apply() }
     fun appearance(): Appearance = Appearance(

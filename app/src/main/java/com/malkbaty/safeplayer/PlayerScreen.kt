@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -43,10 +44,12 @@ fun subtitleMime(name: String): String? = when {
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBack: () -> Unit, onStarted: () -> Unit, onPosition: (Long) -> Unit) {
+fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBack: () -> Unit, onChooseAnother: () -> Unit, onStarted: () -> Unit, onPosition: (Long) -> Unit) {
     var error by remember(entry.uri) { mutableStateOf<String?>(null) }
+    var fileError by remember(entry.uri) { mutableStateOf(false) }
     var subtitle by remember(entry.uri) { mutableStateOf<Pair<Uri, String>?>(null) }
     var showSpeed by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
     var showTracks by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
     var audioSessionId by remember(entry.uri) { mutableIntStateOf(C.AUDIO_SESSION_ID_UNSET) }
@@ -95,7 +98,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                 }
             } catch (_: Exception) { null }
             val mime = subtitleMime(name ?: "")
-            if (mime == null) error = "اختر ملف ترجمة بصيغة SRT أو VTT."
+            if (mime == null) { fileError = false; error = "اختر ملف ترجمة بصيغة SRT أو VTT." }
             else { error = null; applySubtitle(uri to mime) }
         }
     }
@@ -132,7 +135,12 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             override fun onAudioSessionIdChanged(value: Int) { audioSessionId = value }
             override fun onTracksChanged(value: Tracks) { tracks = value }
             override fun onPlaybackParametersChanged(parameters: androidx.media3.common.PlaybackParameters) { speed = parameters.speed }
-            override fun onPlayerError(playbackError: PlaybackException) { error = "تعذر تشغيل الملف أو الترجمة. تحقق من الوصول والصيغة ثم حاول مجدداً." }
+            override fun onPlayerError(playbackError: PlaybackException) {
+                fileError = playbackError.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+                    playbackError.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND
+                error = if (fileError) "تعذر الوصول إلى الملف؛ ربما نُقل أو فُقد الإذن. أعد اختياره أو تحقق من وجوده."
+                    else "تعذر تشغيل الوسائط أو الترجمة. تحقق من الصيغة والاتصال ثم حاول مجدداً."
+            }
         }
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && !activity.isInPictureInPictureMode) player.pause()
@@ -185,33 +193,32 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = "موضع التشغيل" })
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { locked = !locked; gestureMessage = null }) { Text(if (locked) "فتح القفل" else "قفل التحكم") }
                 if (!locked) {
-                if (entry.type == "video") TextButton(onClick = { covered = !covered; gestureMessage = null }) { Text(if (covered) "إظهار الفيديو" else "إخفاء الفيديو") }
-                TextButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) { Text(if (isPlaying) "إيقاف مؤقت" else "تشغيل") }
-                TextButton(onClick = { player.seekBack() }) { Text("رجوع ١٠ ث") }
-                TextButton(onClick = { player.seekForward() }) { Text("تقديم ١٠ ث") }
-                TextButton(onClick = { showEqualizer = true }) { Text("معادل الصوت") }
-                Box {
-                    TextButton(onClick = { showSpeed = true }) { Text("السرعة ${speed}×") }
-                    DropdownMenu(expanded = showSpeed, onDismissRequest = { showSpeed = false }) {
-                        listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
-                            DropdownMenuItem(text = { Text("${speed}×") }, onClick = { player.setPlaybackSpeed(speed); showSpeed = false })
+                    TextButton(onClick = { player.seekBack() }) { Text("رجوع ١٠ ث") }
+                    TextButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) { Text(if (isPlaying) "إيقاف مؤقت" else "تشغيل") }
+                    TextButton(onClick = { player.seekForward() }) { Text("تقديم ١٠ ث") }
+                }
+                TextButton(onClick = { locked = !locked; gestureMessage = null; showMore = false }) { Text(if (locked) "فتح القفل" else "قفل التحكم") }
+                if (!locked) Box {
+                    TextButton(onClick = { showMore = true }) { Text("المزيد") }
+                    DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                        if (entry.type == "video") DropdownMenuItem(text = { Text(if (covered) "إظهار الفيديو" else "إخفاء الفيديو") }, onClick = { covered = !covered; gestureMessage = null; showMore = false })
+                        DropdownMenuItem(text = { Text("السرعة ${speed}×") }, onClick = { showMore = false; showSpeed = true })
+                        DropdownMenuItem(text = { Text("معادل الصوت") }, onClick = { showMore = false; showEqualizer = true })
+                        if (entry.type == "video") {
+                            DropdownMenuItem(text = { Text("إضافة ترجمة") }, onClick = { showMore = false; picker.launch(arrayOf("*/*")) })
+                            DropdownMenuItem(text = { Text("مسارات الترجمة") }, onClick = { showMore = false; showTracks = true })
+                        }
+                        if (entry.type == "video" && !covered && activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                            DropdownMenuItem(text = { Text("نافذة مصغرة") }, onClick = {
+                                showMore = false
+                                try {
+                                    val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
+                                    if (!activity.enterPictureInPictureMode(params)) error = "تعذر فتح صورة داخل صورة على هذا الجهاز."
+                                } catch (_: RuntimeException) { error = "تعذر فتح صورة داخل صورة على هذا الجهاز." }
+                            })
                         }
                     }
-                }
-                if (entry.type == "video") {
-                    TextButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("إضافة ترجمة") }
-                    TextButton(onClick = { showTracks = true }) { Text("مسارات الترجمة") }
-                }
-                if (entry.type == "video" && !covered && activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
-                    TextButton(onClick = {
-                        try {
-                            val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
-                            if (!activity.enterPictureInPictureMode(params)) error = "تعذر فتح صورة داخل صورة على هذا الجهاز."
-                        } catch (_: RuntimeException) { error = "تعذر فتح صورة داخل صورة على هذا الجهاز." }
-                    }) { Text("نافذة مصغرة") }
-                }
                 }
             }
             if (!locked && subtitle != null) TextButton(onClick = { applySubtitle(null) }) { Text("إزالة الترجمة") }
@@ -220,11 +227,21 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
                 Row {
-                    TextButton(onClick = { error = null; player.prepare(); player.playWhenReady = true }) { Text("إعادة المحاولة") }
+                    TextButton(onClick = { error = null; fileError = false; player.prepare(); player.playWhenReady = true }) { Text("إعادة المحاولة") }
+                    if (fileError) TextButton(onClick = onChooseAnother) { Text("إعادة اختيار ملف") }
                     if (subtitle != null) TextButton(onClick = { error = null; applySubtitle(null) }) { Text("إزالة الترجمة") }
                 }
             }
         }
+    }
+    if (showSpeed && !locked && !inPip) {
+        AlertDialog(onDismissRequest = { showSpeed = false }, title = { Text("سرعة التشغيل") }, text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { value ->
+                    TextButton(onClick = { player.setPlaybackSpeed(value); showSpeed = false }) { Text("${value}×${if (speed == value) " ✓" else ""}") }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = { showSpeed = false }) { Text("إغلاق") } })
     }
     AudioEqualizer(audioSessionId, showEqualizer && !locked && !inPip) { showEqualizer = false }
     if (showTracks && !locked && !inPip) {

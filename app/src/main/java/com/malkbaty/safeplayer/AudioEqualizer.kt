@@ -15,6 +15,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.media3.common.C
 
 private data class EqualizerBand(val index: Short, val frequencyHz: Int, val level: Short)
@@ -92,7 +94,7 @@ fun AudioEqualizer(audioSessionId: Int, visible: Boolean, onDismiss: () -> Unit)
                                         error = "تعذر ضبط المعادل. أوقفه وحاول مجدداً."
                                     }
                                 },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "مستوى التردد ${band.frequencyHz} هرتز" }
                             )
                         }
                     }

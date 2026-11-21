@@ -37,6 +37,12 @@ class MediaFilterTest {
         assertEquals("b", lastWatched(entries)?.uri)
         assertEquals(null, lastWatched(emptyList()))
     }
+    @Test fun homeHighlightsAreLimitedAndOrderedIndependentlyOfFilters() {
+        val highlights = libraryHighlights(items, 2)
+        assertEquals(listOf("3", "2"), highlights.recent.map { it.uri })
+        assertEquals(listOf("3", "1"), highlights.favorites.map { it.uri })
+        assertEquals(emptyList<MediaEntry>(), libraryHighlights(items, 0).recent)
+    }
     @Test fun formatsLongPlaybackPositions() {
         assertEquals("01:01", formatPlaybackTime(61_000))
         assertEquals("1:01:01", formatPlaybackTime(3_661_000))
