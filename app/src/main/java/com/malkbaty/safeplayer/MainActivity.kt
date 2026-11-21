@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
@@ -81,6 +82,29 @@ class MainActivity : ComponentActivity() {
         var playing by remember { mutableStateOf<MediaEntry?>(null) }
         var message by remember { mutableStateOf<String?>(null) }
         var pendingDelete by remember { mutableStateOf<MediaEntry?>(null) }
+        var scanning by remember { mutableStateOf(false) }
+        val scanner = remember(dao) { MediaScanner(applicationContext, dao) }
+        fun startScan() {
+            val access = scanner.access()
+            if (!access.video && !access.audio) {
+                message = "لم يُمنح إذن الوصول للوسائط. يمكنك منح الإذن من إعدادات التطبيق أو إضافة ملفات يدوياً."
+                return
+            }
+            scope.launch {
+                scanning = true
+                message = null
+                try {
+                    val result = scanner.scan(access)
+                    val scopeNote = if (!access.video || !access.audio || access.limitedVideo) " الفحص يشمل الوسائط المسموح بها فقط." else ""
+                    message = "اكتمل الفحص: ${result.found} ملف، أُضيف منها ${result.added}.$scopeNote"
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    message = "تعذر إكمال فحص الوسائط؛ قد تكون بعض الملفات أُضيفت. تحقق من الصلاحيات وحاول مجدداً."
+                } finally { scanning = false }
+            }
+        }
+        val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { startScan() }
         val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             scope.launch {
                 var failed = 0
@@ -116,6 +140,10 @@ class MainActivity : ComponentActivity() {
                     Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
                     OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
                     TextButton(onClick = { showSettings = true }) { Text("المظهر") }
+                }
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    OutlinedButton(enabled = !scanning, onClick = { permissionLauncher.launch(scanner.permissions()) }) { Text("فحص وسائط الجهاز") }
+                    if (scanning) { Spacer(Modifier.width(12.dp)); CircularProgressIndicator(Modifier.size(24.dp)); Text(" جارٍ الفحص…") }
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("البحث في المكتبة") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -169,7 +197,7 @@ class MainActivity : ComponentActivity() {
             }, confirmButton = { TextButton(onClick = { showSettings = false }) { Text("تم") } })
         }
         pendingDelete?.let { entry ->
-            AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { dao.delete(entry.uri); try { contentResolver.releasePersistableUriPermission(Uri.parse(entry.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {} } catch (_: Exception) { message = "تعذرت إزالة الملف. حاول مجدداً." } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
+            AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك، وقد يظهر مجدداً عند فحص الوسائط.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { dao.delete(entry.uri); try { contentResolver.releasePersistableUriPermission(Uri.parse(entry.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {} } catch (_: Exception) { message = "تعذرت إزالة الملف. حاول مجدداً." } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
         }
     }
 
