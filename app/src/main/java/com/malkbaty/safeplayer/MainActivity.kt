@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
                             SafePlayerApp(repository, palette, dark, showThumbnails, onThumbnails = { show ->
                                 showThumbnails = show
                                 settings.setShowThumbnails(show)
+                        if (!show) ThumbnailLoader.clearIfCreated()
                             }) { selected, isDark ->
                                 palette = selected
                                 dark = isDark
@@ -184,7 +185,8 @@ class MainActivity : ComponentActivity() {
                 if (!stream) lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
             })
         } else {
-            val filtered = searchLibrary(entries, LibraryQuery(query, type, favorites, sort))
+            val filtered = remember(entries, query, type, favorites, sort) { searchLibrary(entries, LibraryQuery(query, type, favorites, sort)) }
+            val recent = remember(entries) { lastWatched(entries) }
             LazyVerticalGrid(
                 columns = if (gridView) GridCells.Adaptive(230.dp) else GridCells.Fixed(1),
                 modifier = Modifier.fillMaxSize(),
@@ -232,7 +234,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 if (library is LibraryState.Ready) {
-                    lastWatched(entries)?.let { recent ->
+                    recent?.let { recent ->
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             ElevatedCard(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(14.dp)) {

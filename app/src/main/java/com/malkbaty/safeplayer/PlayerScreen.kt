@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -103,18 +104,24 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             if (player.isPlaying) latestOnPosition(player.currentPosition.coerceAtLeast(0))
         }
     }
-    LaunchedEffect(player) {
-        while (true) {
-            positionMs = player.currentPosition.coerceAtLeast(0)
-            durationMs = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
-            delay(250)
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(player, owner, inPip, locked, isPlaying) {
+        if (!inPip && !locked && isPlaying) owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                positionMs = player.currentPosition.coerceAtLeast(0)
+                durationMs = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
+                delay(1000)
+            }
         }
     }
     val latestOnStarted by rememberUpdatedState(onStarted)
-    val owner = LocalLifecycleOwner.current
     DisposableEffect(player, owner) {
         val initialBrightness = activity.window.attributes.screenBrightness
         val listener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                positionMs = player.currentPosition.coerceAtLeast(0)
+                durationMs = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
+            }
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing; if (playing) { startedOnce = true; latestOnStarted() } }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING

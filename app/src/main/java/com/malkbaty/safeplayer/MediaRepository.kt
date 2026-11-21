@@ -55,6 +55,7 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
                 failed++
             }
         }
+        if (uris.isNotEmpty()) ThumbnailLoader.clearIfCreated()
         ImportResult(added, failed)
     }
 
@@ -63,6 +64,7 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
     suspend fun savePosition(uri: String, position: Long) = dao.savePosition(uri, position.coerceAtLeast(0))
     suspend fun remove(uri: String) {
         dao.delete(uri)
+        ThumbnailLoader.clearIfCreated()
         try {
             context.contentResolver.releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
