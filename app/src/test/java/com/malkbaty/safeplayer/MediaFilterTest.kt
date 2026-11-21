@@ -43,6 +43,16 @@ class MediaFilterTest {
         assertEquals(listOf("3", "1"), highlights.favorites.map { it.uri })
         assertEquals(emptyList<MediaEntry>(), libraryHighlights(items, 0).recent)
     }
+    @Test fun historyAndWatchLaterFiltersCombineAndHistorySortsByPlayback() {
+        val entries = listOf(
+            MediaEntry("a", "A", "video", 100, lastPlayedAt = 20, watchLater = true),
+            MediaEntry("b", "B", "audio", 200, lastPlayedAt = 40, watchLater = true),
+            MediaEntry("c", "C", "video", 300, watchLater = true),
+            MediaEntry("d", "D", "video", 400, lastPlayedAt = 50)
+        )
+        assertEquals(listOf("b", "a"), searchLibrary(entries, LibraryQuery(sort = MediaSort.LAST_PLAYED, watchLaterOnly = true, historyOnly = true)).map { it.uri })
+        assertEquals(listOf("a"), searchLibrary(entries, LibraryQuery(type = "video", watchLaterOnly = true, historyOnly = true)).map { it.uri })
+    }
     @Test fun formatsLongPlaybackPositions() {
         assertEquals("01:01", formatPlaybackTime(61_000))
         assertEquals("1:01:01", formatPlaybackTime(3_661_000))

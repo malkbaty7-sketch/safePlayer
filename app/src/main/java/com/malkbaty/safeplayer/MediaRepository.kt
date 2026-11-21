@@ -61,6 +61,7 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
 
     suspend fun markPlayed(uri: String, time: Long) = dao.markPlayed(uri, time)
     suspend fun setFavorite(uri: String, favorite: Boolean) = dao.setFavorite(uri, favorite)
+    suspend fun setWatchLater(uri: String, value: Boolean) = dao.setWatchLater(uri, value)
     suspend fun savePosition(uri: String, position: Long) = dao.savePosition(uri, position.coerceAtLeast(0))
     suspend fun remove(uri: String) {
         dao.delete(uri)
@@ -73,19 +74,20 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
     }
 }
 
-enum class MediaSort(val label: String) { NEWEST("الأحدث"), OLDEST("الأقدم"), NAME("الاسم"), DURATION("المدة"), SIZE("الحجم") }
+enum class MediaSort(val label: String) { NEWEST("الأحدث"), OLDEST("الأقدم"), NAME("الاسم"), DURATION("المدة"), SIZE("الحجم"), LAST_PLAYED("آخر تشغيل") }
 
-data class LibraryQuery(val text: String = "", val type: String = "all", val favoritesOnly: Boolean = false, val sort: MediaSort = MediaSort.NEWEST)
+data class LibraryQuery(val text: String = "", val type: String = "all", val favoritesOnly: Boolean = false, val sort: MediaSort = MediaSort.NEWEST, val watchLaterOnly: Boolean = false, val historyOnly: Boolean = false)
 
 /** Search works on titles, not content: it cannot classify or assess video safety. */
 fun searchLibrary(items: List<MediaEntry>, query: LibraryQuery): List<MediaEntry> {
     val filtered = items.filter { it.title.contains(query.text.trim(), ignoreCase = true) &&
-        (query.type == "all" || it.type == query.type) && (!query.favoritesOnly || it.favorite) }
+        (query.type == "all" || it.type == query.type) && (!query.favoritesOnly || it.favorite) && (!query.watchLaterOnly || it.watchLater) && (!query.historyOnly || it.lastPlayedAt > 0) }
     return when (query.sort) {
         MediaSort.NEWEST -> filtered.sortedWith(compareByDescending<MediaEntry> { it.addedAt }.thenBy { it.uri })
         MediaSort.OLDEST -> filtered.sortedWith(compareBy<MediaEntry> { it.addedAt }.thenBy { it.uri })
         MediaSort.NAME -> filtered.sortedWith(compareBy<MediaEntry, String>(String.CASE_INSENSITIVE_ORDER) { it.title }.thenBy { it.uri })
         MediaSort.DURATION -> filtered.sortedWith(compareBy<MediaEntry> { it.durationMs == null }.thenBy { it.durationMs }.thenBy { it.uri })
+        MediaSort.LAST_PLAYED -> filtered.sortedWith(compareByDescending<MediaEntry> { it.lastPlayedAt }.thenBy { it.uri })
         MediaSort.SIZE -> filtered.sortedWith(compareBy<MediaEntry> { it.sizeBytes == null }.thenBy { it.sizeBytes }.thenBy { it.uri })
     }
 }
