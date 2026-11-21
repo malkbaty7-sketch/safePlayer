@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.core.view.WindowCompat
 import androidx.work.WorkInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -58,18 +59,32 @@ class MainActivity : ComponentActivity() {
             var palette by remember { mutableStateOf(appearance.palette) }
             var dark by remember { mutableStateOf(appearance.dark) }
             var showThumbnails by remember { mutableStateOf(settings.showThumbnails()) }
+            SideEffect {
+                if (Build.VERSION.SDK_INT < 35) {
+                    val barColor = if (dark) android.graphics.Color.rgb(20, 18, 24) else android.graphics.Color.rgb(248, 250, 246)
+                    @Suppress("DEPRECATION")
+                    window.statusBarColor = barColor
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = barColor
+                }
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                controller.isAppearanceLightStatusBars = !dark
+                controller.isAppearanceLightNavigationBars = !dark
+            }
             SafePlayerTheme(palette, dark) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    SafePlayerApp(repository, palette, dark, showThumbnails, onThumbnails = { show ->
-                        showThumbnails = show
-                        settings.setShowThumbnails(show)
-                    }) { selected, isDark ->
-                        palette = selected
-                        dark = isDark
-                        settings.saveAppearance(Appearance(selected, isDark))
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                        Box(Modifier.fillMaxSize().then(if (inPip) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing))) {
+                            SafePlayerApp(repository, palette, dark, showThumbnails, onThumbnails = { show ->
+                                showThumbnails = show
+                                settings.setShowThumbnails(show)
+                            }) { selected, isDark ->
+                                palette = selected
+                                dark = isDark
+                                settings.saveAppearance(Appearance(selected, isDark))
+                            }
+                        }
                     }
-                }
                 }
             }
         }
