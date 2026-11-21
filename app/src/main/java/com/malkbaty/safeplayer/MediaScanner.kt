@@ -39,17 +39,17 @@ class MediaScanner(private val context: Context, private val dao: MediaDao) {
         var added = 0
         suspend fun scanType(type: String) {
             val collection = if (type == "video") MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-            val columns = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.DATE_ADDED)
+            val columns = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE, "duration")
             val cursor = context.contentResolver.query(collection, columns, null, null, null)
                 ?: throw IllegalStateException("MediaStore query returned no cursor")
             cursor.use {
                 val idIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                 val nameIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                val dateIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                val dateIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE, "duration")
                 val batch = ArrayList<MediaEntry>(100)
                 suspend fun flush() {
                     if (batch.isNotEmpty()) {
-                        added += dao.insertAll(batch).count { row -> row != -1L }
+                        added += dao.mergeScanned(batch)
                         batch.clear()
                     }
                 }
@@ -59,7 +59,9 @@ class MediaScanner(private val context: Context, private val dao: MediaDao) {
                     val uri = ContentUris.withAppendedId(collection, id).toString()
                     val name = it.getString(nameIndex)?.takeIf(String::isNotBlank) ?: "ملف وسائط"
                     val addedAt = it.getLong(dateIndex).coerceAtLeast(0).coerceAtMost(Long.MAX_VALUE / 1000) * 1000
-                    batch.add(MediaEntry(uri, name, type, addedAt))
+                    val size = if (it.isNull(sizeIndex)) null else it.getLong(sizeIndex).takeIf { value -> value >= 0 }
+                    val duration = if (it.isNull(durationIndex)) null else it.getLong(durationIndex).takeIf { value -> value > 0 }
+                    batch.add(MediaEntry(uri, name, type, addedAt, durationMs = duration, sizeBytes = size))
                     found++
                     if (batch.size == 100) flush()
                 }

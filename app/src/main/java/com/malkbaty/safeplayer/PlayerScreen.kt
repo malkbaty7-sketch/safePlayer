@@ -14,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -40,7 +42,7 @@ fun subtitleMime(name: String): String? = when {
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBack: () -> Unit, onPosition: (Long) -> Unit) {
+fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBack: () -> Unit, onStarted: () -> Unit, onPosition: (Long) -> Unit) {
     var error by remember(entry.uri) { mutableStateOf<String?>(null) }
     var subtitle by remember(entry.uri) { mutableStateOf<Pair<Uri, String>?>(null) }
     var showSpeed by remember { mutableStateOf(false) }
@@ -48,9 +50,13 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var locked by remember(entry.uri) { mutableStateOf(false) }
     var covered by remember(entry.uri) { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
+    var startedOnce by remember(entry.uri) { mutableStateOf(false) }
     var gestureMessage by remember { mutableStateOf<String?>(null) }
     var speed by remember { mutableFloatStateOf(1f) }
     var tracks by remember { mutableStateOf(Tracks.EMPTY) }
+    var positionMs by remember(entry.uri) { mutableLongStateOf(entry.positionMs) }
+    var durationMs by remember(entry.uri) { mutableLongStateOf(0L) }
+    var scrub by remember(entry.uri) { mutableStateOf<Float?>(null) }
     val player = remember(entry.uri) {
         ExoPlayer.Builder(activity).build().apply {
             setMediaItem(MediaItem.Builder().setUri(Uri.parse(entry.uri))
@@ -93,11 +99,20 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             if (player.isPlaying) latestOnPosition(player.currentPosition.coerceAtLeast(0))
         }
     }
+    LaunchedEffect(player) {
+        while (true) {
+            positionMs = player.currentPosition.coerceAtLeast(0)
+            durationMs = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
+            delay(250)
+        }
+    }
+    val latestOnStarted by rememberUpdatedState(onStarted)
     val owner = LocalLifecycleOwner.current
     DisposableEffect(player, owner) {
         val initialBrightness = activity.window.attributes.screenBrightness
         val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing; if (playing) { startedOnce = true; latestOnStarted() } }
+            override fun onPlaybackStateChanged(playbackState: Int) { if (playbackState == Player.STATE_ENDED) latestOnPosition(0) }
             override fun onTracksChanged(value: Tracks) { tracks = value }
             override fun onPlaybackParametersChanged(parameters: androidx.media3.common.PlaybackParameters) { speed = parameters.speed }
             override fun onPlayerError(playbackError: PlaybackException) { error = "تعذر تشغيل الملف أو الترجمة. تحقق من الوصول والصيغة ثم حاول مجدداً." }
@@ -108,9 +123,10 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         player.addListener(listener)
         tracks = player.currentTracks
         isPlaying = player.isPlaying
+        if (player.isPlaying) { startedOnce = true; latestOnStarted() }
         owner.lifecycle.addObserver(observer)
         onDispose {
-            val position = if (player.playbackState == Player.STATE_ENDED) 0L else player.currentPosition.coerceAtLeast(0)
+            val position = if (player.playbackState == Player.STATE_ENDED) 0L else if (!startedOnce && player.playerError != null) entry.positionMs else player.currentPosition.coerceAtLeast(0)
             onPosition(position)
             owner.lifecycle.removeObserver(observer)
             player.removeListener(listener)
@@ -140,15 +156,21 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             gestureMessage?.let { Text(it, modifier = Modifier.align(Alignment.Center), color = androidx.compose.ui.graphics.Color.White) }
         }
         if (!inPip) {
+            if (!locked) {
+                val shownPosition = scrub?.let { (it * durationMs).toLong() } ?: positionMs
+                Text("${formatPlaybackTime(shownPosition)} / ${if (durationMs > 0) formatPlaybackTime(durationMs) else "--:--"}", style = MaterialTheme.typography.bodySmall)
+                Slider(value = scrub ?: if (durationMs > 0) (positionMs.toDouble() / durationMs).toFloat().coerceIn(0f, 1f) else 0f,
+                    onValueChange = { scrub = it }, onValueChangeFinished = { scrub?.let { player.seekTo((it * durationMs).toLong()) }; scrub = null },
+                    enabled = durationMs > 0 && player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM),
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "موضع التشغيل" })
+            }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { locked = !locked; gestureMessage = null }) { Text(if (locked) "فتح القفل" else "قفل التحكم") }
                 if (!locked) {
                 if (entry.type == "video") TextButton(onClick = { covered = !covered; gestureMessage = null }) { Text(if (covered) "إظهار الفيديو" else "إخفاء الفيديو") }
-                if (covered) {
-                    TextButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) { Text(if (isPlaying) "إيقاف مؤقت" else "تشغيل") }
-                    TextButton(onClick = { player.seekBack() }) { Text("رجوع ١٠ ث") }
-                    TextButton(onClick = { player.seekForward() }) { Text("تقديم ١٠ ث") }
-                }
+                TextButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) { Text(if (isPlaying) "إيقاف مؤقت" else "تشغيل") }
+                TextButton(onClick = { player.seekBack() }) { Text("رجوع ١٠ ث") }
+                TextButton(onClick = { player.seekForward() }) { Text("تقديم ١٠ ث") }
                 Box {
                     TextButton(onClick = { showSpeed = true }) { Text("السرعة ${speed}×") }
                     DropdownMenu(expanded = showSpeed, onDismissRequest = { showSpeed = false }) {
@@ -212,4 +234,12 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         }, confirmButton = { TextButton(onClick = { showTracks = false }) { Text("إغلاق") } })
     }
 
+}
+
+fun formatPlaybackTime(ms: Long): String {
+    val seconds = ms.coerceAtLeast(0) / 1000
+    val hours = seconds / 3600
+    val minutes = (seconds / 60) % 60
+    return if (hours > 0) "%d:%02d:%02d".format(java.util.Locale.ROOT, hours, minutes, seconds % 60)
+    else "%02d:%02d".format(java.util.Locale.ROOT, minutes, seconds % 60)
 }

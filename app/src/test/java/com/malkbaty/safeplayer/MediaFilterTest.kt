@@ -24,4 +24,21 @@ class MediaFilterTest {
         val tied = listOf(MediaEntry("b", "same", "audio", 0), MediaEntry("a", "Same", "video", 0))
         assertEquals(listOf("a", "b"), searchLibrary(tied, LibraryQuery(sort = MediaSort.NAME)).map { it.uri })
     }
+    @Test fun sortsNumericMetadataAndPlacesUnknownLast() {
+        val entries = listOf(MediaEntry("a", "a", "video", 0, durationMs = 1000, sizeBytes = 100),
+            MediaEntry("b", "b", "video", 0, durationMs = 10000, sizeBytes = 2), MediaEntry("c", "c", "video", 0))
+        assertEquals(listOf("a", "b", "c"), searchLibrary(entries, LibraryQuery(sort = MediaSort.DURATION)).map { it.uri })
+        assertEquals(listOf("b", "a", "c"), searchLibrary(entries, LibraryQuery(sort = MediaSort.SIZE)).map { it.uri })
+    }
+    @Test fun resumeUsesLastPlayedTimestampNotPosition() {
+        val entries = listOf(MediaEntry("a", "a", "video", 0, positionMs = 900000, lastPlayedAt = 10),
+            MediaEntry("b", "b", "audio", 0, positionMs = 1000, lastPlayedAt = 20),
+            MediaEntry("c", "c", "video", 0, positionMs = 0, lastPlayedAt = 30))
+        assertEquals("b", lastWatched(entries)?.uri)
+        assertEquals(null, lastWatched(emptyList()))
+    }
+    @Test fun formatsLongPlaybackPositions() {
+        assertEquals("01:01", formatPlaybackTime(61_000))
+        assertEquals("1:01:01", formatPlaybackTime(3_661_000))
+    }
 }
