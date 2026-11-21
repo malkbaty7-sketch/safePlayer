@@ -94,3 +94,13 @@ fun searchLibrary(items: List<MediaEntry>, query: LibraryQuery): List<MediaEntry
 fun lastWatched(items: List<MediaEntry>): MediaEntry? = items
     .filter { it.positionMs > 0 && it.lastPlayedAt > 0 }
     .maxWithOrNull(compareBy<MediaEntry> { it.lastPlayedAt }.thenBy { it.uri })
+
+/** Compact home shortcuts, independent of the current search and sort. */
+data class LibraryHighlights(val recent: List<MediaEntry>, val favorites: List<MediaEntry>)
+fun libraryHighlights(items: List<MediaEntry>, limit: Int = 5): LibraryHighlights {
+    require(limit >= 0)
+    return LibraryHighlights(
+        items.sortedWith(compareByDescending<MediaEntry> { it.addedAt }.thenBy { it.uri }).take(limit),
+        items.filter { it.favorite }.sortedWith(compareByDescending<MediaEntry> { it.addedAt }.thenBy { it.uri }).take(limit)
+    )
+}

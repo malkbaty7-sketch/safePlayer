@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.core.view.WindowCompat
@@ -100,6 +102,8 @@ class MainActivity : ComponentActivity() {
         }
         val library by libraryFlow.collectAsStateWithLifecycle(initialValue = LibraryState.Loading)
         val entries = (library as? LibraryState.Ready)?.entries.orEmpty()
+        val settings = remember { SettingsRepository(applicationContext) }
+        var showWelcome by remember { mutableStateOf(settings.showWelcome()) }
         var showSettings by remember { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
         var type by rememberSaveable { mutableStateOf("all") }
@@ -178,7 +182,7 @@ class MainActivity : ComponentActivity() {
         if (current != null) {
             val stream = isNetworkStream
             BackHandler { playing = null }
-            PlayerScreen(this, current, inPip, onBack = { playing = null }, onStarted = {
+            PlayerScreen(this, current, inPip, onBack = { playing = null }, onChooseAnother = { playing = null; picker.launch(arrayOf("video/*", "audio/*")) }, onStarted = {
                 if (!stream) lifecycleScope.launch { try { repository.markPlayed(current.uri, System.currentTimeMillis()) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ سجل التشغيل." } }
             }, onPosition = { position ->
                 // Activity lifecycle scope survives disposal of the player composable.
@@ -187,6 +191,8 @@ class MainActivity : ComponentActivity() {
         } else {
             val filtered = remember(entries, query, type, favorites, sort) { searchLibrary(entries, LibraryQuery(query, type, favorites, sort)) }
             val recent = remember(entries) { lastWatched(entries) }
+            val highlights = remember(entries) { libraryHighlights(entries) }
+            val filtersActive = query.isNotBlank() || type != "all" || favorites
             LazyVerticalGrid(
                 columns = if (gridView) GridCells.Adaptive(230.dp) else GridCells.Fixed(1),
                 modifier = Modifier.fillMaxSize(),
@@ -198,6 +204,15 @@ class MainActivity : ComponentActivity() {
                     Column {
                         Text("SafePlayer", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
                         Text("مكتبتك الخاصة، على جهازك", style = MaterialTheme.typography.bodyMedium)
+                        if (showWelcome) {
+                            ElevatedCard(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("مرحباً بك في SafePlayer", style = MaterialTheme.typography.titleMedium)
+                                    Text("أضف ملفات تختارها بنفسك، أو افحص وسائط الجهاز بعد منح الإذن. يمكنك رفض الإذن واستخدام إضافة الملفات بدلاً منه.")
+                                    TextButton(onClick = { showWelcome = false; settings.dismissWelcome() }) { Text("تخطي المقدمة") }
+                                }
+                            }
+                        }
                         Spacer(Modifier.height(12.dp))
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
@@ -217,6 +232,10 @@ class MainActivity : ComponentActivity() {
                                 FilterChip(selected = type == value, onClick = { type = value }, label = { Text(label) })
                             }
                         }
+                        if (filtersActive) {
+                            Text("الفلاتر النشطة: ${if (query.isNotBlank()) "بحث · " else ""}${if (type != "all") (if (type == "video") "فيديو · " else "صوتيات · ") else ""}${if (favorites) "المفضلة" else ""}", style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { query = ""; type = "all"; favorites = false }) { Text("مسح البحث والفلاتر") }
+                        }
                         message?.let { Text(it, color = MaterialTheme.colorScheme.primary); TextButton(onClick = { message = null }) { Text("إغلاق الرسالة") } }
                         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                             Box {
@@ -233,7 +252,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                if (library is LibraryState.Ready) {
+                if (library is LibraryState.Ready && !filtersActive) {
                     recent?.let { recent ->
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             ElevatedCard(Modifier.fillMaxWidth()) {
@@ -245,11 +264,24 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                    if (highlights.recent.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                        LibraryShortcutSection("أُضيف مؤخراً", highlights.recent) { isNetworkStream = false; playing = it }
+                    }
+                    if (highlights.favorites.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                        LibraryShortcutSection("المفضلة", highlights.favorites) { isNetworkStream = false; playing = it }
+                    }
                 }
+                item(span = { GridItemSpan(maxLineSpan) }) { Text("المكتبة", style = MaterialTheme.typography.titleLarge) }
                 when {
                     library is LibraryState.Loading -> item(span = { GridItemSpan(maxLineSpan) }) { Column { CircularProgressIndicator(); Text("جارٍ تحميل المكتبة…") } }
                     library is LibraryState.Error -> item(span = { GridItemSpan(maxLineSpan) }) { Column { Text("تعذر تحميل المكتبة. حاول مجدداً.", color = MaterialTheme.colorScheme.error); Button(onClick = { retry++ }) { Text("إعادة المحاولة") } } }
-                    filtered.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة. غيّر البحث أو الفلتر.") }
+                    filtered.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                        Column {
+                            Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة للبحث والفلاتر الحالية.")
+                            if (filtersActive) TextButton(onClick = { query = ""; type = "all"; favorites = false }) { Text("عرض كل الملفات") }
+                            else if (entries.isEmpty()) TextButton(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("اختر ملفات") }
+                        }
+                    }
                     else -> items(filtered, key = { it.uri }) { entry ->
                         MediaCard(entry = entry, uploading = uploading, showThumbnails = showThumbnails, onPlay = { isNetworkStream = false; playing = entry },
                             onFavorite = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } },
@@ -324,4 +356,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+}
+
+@Composable
+private fun LibraryShortcutSection(title: String, entries: List<MediaEntry>, onPlay: (MediaEntry) -> Unit) {
+    Column {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            entries.forEach { entry ->
+                OutlinedButton(onClick = { onPlay(entry) }, modifier = Modifier.widthIn(max = 220.dp)) {
+                    Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelLarge.copy(textDirection = TextDirection.Content))
+                }
+            }
+        }
+    }
 }

@@ -13,6 +13,13 @@ import org.junit.runner.RunWith
 class SettingsRepositoryTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     @After fun cleanup() { context.getSharedPreferences("appearance", Context.MODE_PRIVATE).edit().clear().commit() }
+    @Test fun welcomeDismissalPersists() {
+        context.getSharedPreferences("appearance", Context.MODE_PRIVATE).edit().clear().commit()
+        val settings = SettingsRepository(context)
+        assertTrue(settings.showWelcome())
+        settings.dismissWelcome()
+        assertFalse(SettingsRepository(context).showWelcome())
+    }
     @Test fun thumbnailPreferencePersists() {
         val settings = SettingsRepository(context)
         settings.setShowThumbnails(false)
