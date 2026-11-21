@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 
 /** Thumbnails are best effort and local-only; SAF providers and older devices may not supply them. */
 @Composable
-fun MediaCard(entry: MediaEntry, uploading: Boolean, showThumbnails: Boolean = true, onPlay: () -> Unit, onFavorite: () -> Unit, onDelete: () -> Unit, onCloud: () -> Unit) {
+fun MediaCard(entry: MediaEntry, uploading: Boolean, showThumbnails: Boolean = true, onPlay: () -> Unit, onFavorite: () -> Unit, onWatchLater: () -> Unit, onDelete: () -> Unit, onCloud: () -> Unit) {
     val context = LocalContext.current
     val thumbnail by produceState<Bitmap?>(null, entry.uri, entry.type, entry.sizeBytes, entry.durationMs, showThumbnails) {
         value = null
@@ -48,6 +48,7 @@ fun MediaCard(entry: MediaEntry, uploading: Boolean, showThumbnails: Boolean = t
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 TextButton(onClick = onPlay, modifier = Modifier.semantics { contentDescription = "تشغيل ${entry.title}" }) { Text("تشغيل") }
                 TextButton(onClick = onFavorite, modifier = Modifier.semantics { contentDescription = "${if (entry.favorite) "إزالة من المفضلة" else "إضافة إلى المفضلة"}: ${entry.title}" }) { Text(if (entry.favorite) "إزالة المفضلة" else "مفضلة") }
+                TextButton(onClick = onWatchLater, modifier = Modifier.semantics { contentDescription = "${if (entry.watchLater) "إزالة من المشاهدة لاحقاً" else "إضافة إلى المشاهدة لاحقاً"}: ${entry.title}" }) { Text(if (entry.watchLater) "إزالة من لاحقاً" else "شاهد لاحقاً") }
                 TextButton(onClick = onDelete, modifier = Modifier.semantics { contentDescription = "إزالة ${entry.title} من المكتبة" }) { Text("حذف") }
                 if (entry.type == "video") TextButton(enabled = !uploading, onClick = onCloud, modifier = Modifier.semantics { contentDescription = "حفظ بيانات ${entry.title} سحابياً" }) { Text("حفظ سحابي") }
             }

@@ -26,7 +26,8 @@ data class MediaEntry(
     val positionMs: Long = 0,
     @ColumnInfo(defaultValue = "0") val lastPlayedAt: Long = 0,
     val durationMs: Long? = null,
-    val sizeBytes: Long? = null
+    val sizeBytes: Long? = null,
+    @ColumnInfo(defaultValue = "0") val watchLater: Boolean = false
 )
 
 @Dao
@@ -57,6 +58,9 @@ interface MediaDao {
     @Query("UPDATE media SET favorite = :favorite WHERE uri = :uri")
     suspend fun setFavorite(uri: String, favorite: Boolean)
 
+    @Query("UPDATE media SET watchLater = :watchLater WHERE uri = :uri")
+    suspend fun setWatchLater(uri: String, watchLater: Boolean)
+
     @Query("UPDATE media SET positionMs = :position WHERE uri = :uri")
     suspend fun savePosition(uri: String, position: Long)
 
@@ -64,7 +68,7 @@ interface MediaDao {
     suspend fun delete(uri: String)
 }
 
-@Database(entities = [MediaEntry::class], version = 2, exportSchema = false)
+@Database(entities = [MediaEntry::class], version = 3, exportSchema = false)
 abstract class MediaDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
 
@@ -76,10 +80,15 @@ abstract class MediaDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE media ADD COLUMN sizeBytes INTEGER")
             }
         }
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE media ADD COLUMN watchLater INTEGER NOT NULL DEFAULT 0")
+            }
+        }
         @Volatile private var instance: MediaDatabase? = null
         fun get(context: Context): MediaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, MediaDatabase::class.java, "safeplayer.db")
-                .addMigrations(MIGRATION_1_2).build().also { instance = it }
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
     }
 }

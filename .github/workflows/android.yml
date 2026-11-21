@@ -36,7 +36,11 @@ jobs:
   device-tests:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [26, 35]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -52,7 +56,7 @@ jobs:
       - name: Run Android device tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ matrix.api-level }}
           target: google_apis
           arch: x86_64
           disable-animations: true
@@ -62,6 +66,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-device-test-reports
+          name: android-device-test-reports-api-${{ matrix.api-level }}
           path: app/build/reports/androidTests/
           if-no-files-found: ignore

@@ -20,11 +20,14 @@ class MediaDaoTest {
     @After fun close() = db.close()
     @Test fun rescanDoesNotOverwriteFavoriteOrResumePosition() = runBlocking {
         val dao = db.mediaDao()
-        dao.insert(MediaEntry("content://video/1", "old", "video", 10, favorite = true, positionMs = 5000))
+        dao.insert(MediaEntry("content://video/1", "old", "video", 10, favorite = true, positionMs = 5000, watchLater = true))
         val result = dao.mergeScanned(listOf(MediaEntry("content://video/1", "new", "video", 20, durationMs = 30000, sizeBytes = 100), MediaEntry("content://video/2", "second", "video", 30)))
         assertEquals(1, result)
         val entries = dao.observeAll().first().associateBy { it.uri }
         assertEquals(true, entries.getValue("content://video/1").favorite)
+        assertEquals(true, entries.getValue("content://video/1").watchLater)
+        dao.setWatchLater("content://video/1", false)
+        assertEquals(false, dao.observeAll().first().first { it.uri == "content://video/1" }.watchLater)
         assertEquals(5000L, entries.getValue("content://video/1").positionMs)
         assertEquals("old", entries.getValue("content://video/1").title)
         assertEquals(30000L, entries.getValue("content://video/1").durationMs)

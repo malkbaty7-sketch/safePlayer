@@ -108,6 +108,8 @@ class MainActivity : ComponentActivity() {
         var query by rememberSaveable { mutableStateOf("") }
         var type by rememberSaveable { mutableStateOf("all") }
         var favorites by rememberSaveable { mutableStateOf(false) }
+        var watchLater by rememberSaveable { mutableStateOf(false) }
+        var history by rememberSaveable { mutableStateOf(false) }
         var sort by rememberSaveable { mutableStateOf(MediaSort.NEWEST) }
         var showSort by remember { mutableStateOf(false) }
         var gridView by rememberSaveable { mutableStateOf(true) }
@@ -189,10 +191,10 @@ class MainActivity : ComponentActivity() {
                 if (!stream) lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
             })
         } else {
-            val filtered = remember(entries, query, type, favorites, sort) { searchLibrary(entries, LibraryQuery(query, type, favorites, sort)) }
+            val filtered = remember(entries, query, type, favorites, sort, watchLater, history) { searchLibrary(entries, LibraryQuery(query, type, favorites, sort, watchLater, history)) }
             val recent = remember(entries) { lastWatched(entries) }
             val highlights = remember(entries) { libraryHighlights(entries) }
-            val filtersActive = query.isNotBlank() || type != "all" || favorites
+            val filtersActive = query.isNotBlank() || type != "all" || favorites || watchLater || history
             LazyVerticalGrid(
                 columns = if (gridView) GridCells.Adaptive(230.dp) else GridCells.Fixed(1),
                 modifier = Modifier.fillMaxSize(),
@@ -217,6 +219,8 @@ class MainActivity : ComponentActivity() {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
                             OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
+                            OutlinedButton(onClick = { watchLater = !watchLater }) { Text(if (watchLater) "إلغاء لاحقاً" else "المشاهدة لاحقاً") }
+                            OutlinedButton(onClick = { history = !history; if (history) sort = MediaSort.LAST_PLAYED }) { Text(if (history) "إلغاء السجل" else "سجل التشغيل") }
                             TextButton(onClick = { showStreamDialog = true }) { Text("بث الشبكة") }
                             TextButton(onClick = { showSettings = true }) { Text("الإعدادات") }
                             TextButton(onClick = { showCloud = true }) { Text("السحابة") }
@@ -233,8 +237,8 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         if (filtersActive) {
-                            Text("الفلاتر النشطة: ${if (query.isNotBlank()) "بحث · " else ""}${if (type != "all") (if (type == "video") "فيديو · " else "صوتيات · ") else ""}${if (favorites) "المفضلة" else ""}", style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { query = ""; type = "all"; favorites = false }) { Text("مسح البحث والفلاتر") }
+                            Text("الفلاتر النشطة: ${if (query.isNotBlank()) "بحث · " else ""}${if (type != "all") (if (type == "video") "فيديو · " else "صوتيات · ") else ""}${if (favorites) "المفضلة · " else ""}${if (watchLater) "المشاهدة لاحقاً · " else ""}${if (history) "سجل التشغيل" else ""}", style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { query = ""; type = "all"; favorites = false; watchLater = false; history = false }) { Text("مسح البحث والفلاتر") }
                         }
                         message?.let { Text(it, color = MaterialTheme.colorScheme.primary); TextButton(onClick = { message = null }) { Text("إغلاق الرسالة") } }
                         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -278,13 +282,14 @@ class MainActivity : ComponentActivity() {
                     filtered.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
                         Column {
                             Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة للبحث والفلاتر الحالية.")
-                            if (filtersActive) TextButton(onClick = { query = ""; type = "all"; favorites = false }) { Text("عرض كل الملفات") }
+                            if (filtersActive) TextButton(onClick = { query = ""; type = "all"; favorites = false; watchLater = false; history = false }) { Text("عرض كل الملفات") }
                             else if (entries.isEmpty()) TextButton(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("اختر ملفات") }
                         }
                     }
                     else -> items(filtered, key = { it.uri }) { entry ->
                         MediaCard(entry = entry, uploading = uploading, showThumbnails = showThumbnails, onPlay = { isNetworkStream = false; playing = entry },
                             onFavorite = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } },
+                            onWatchLater = { scope.launch { try { repository.setWatchLater(entry.uri, !entry.watchLater); message = if (entry.watchLater) "أُزيل من المشاهدة لاحقاً." else "أُضيف إلى المشاهدة لاحقاً." } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر تحديث قائمة المشاهدة لاحقاً. حاول مجدداً." } } },
                             onDelete = { pendingDelete = entry }, onCloud = { pendingUpload = entry })
                     }
                 }
