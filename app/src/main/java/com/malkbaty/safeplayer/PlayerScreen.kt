@@ -59,11 +59,11 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var externalChapters by remember(entry.uri) { mutableStateOf<List<PlaybackChapter>?>(null) }
     var chapterSelection by remember(entry.uri) { mutableStateOf<Pair<Uri, Int>?>(null) }
     var chapterLoading by remember(entry.uri) { mutableStateOf(false) }
-    var matroskaChapters by remember(entry.uri) { mutableStateOf<List<PlaybackChapter>>(emptyList()) }
-    var matroskaLoading by remember(entry.uri) { mutableStateOf(false) }
-    var matroskaError by remember(entry.uri) { mutableStateOf(false) }
-    var matroskaTried by remember(entry.uri) { mutableStateOf(false) }
-    var matroskaRetry by remember(entry.uri) { mutableIntStateOf(0) }
+    var embeddedChapters by remember(entry.uri) { mutableStateOf<List<PlaybackChapter>>(emptyList()) }
+    var embeddedLoading by remember(entry.uri) { mutableStateOf(false) }
+    var embeddedError by remember(entry.uri) { mutableStateOf(false) }
+    var embeddedTried by remember(entry.uri) { mutableStateOf(false) }
+    var embeddedRetry by remember(entry.uri) { mutableIntStateOf(0) }
     var chapterError by remember(entry.uri) { mutableStateOf<String?>(null) }
     var showTracks by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
@@ -149,30 +149,31 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         catch (_: Exception) { chapterError = "تعذرت قراءة ملف الفصول. اختر ملف WebVTT صالحاً لا يتجاوز 512 كيلوبايت." }
         finally { chapterLoading = false }
     }
-    LaunchedEffect(showChapters, entry.uri, matroskaRetry) {
+    LaunchedEffect(showChapters, entry.uri, embeddedRetry) {
         val uri = Uri.parse(entry.uri)
-        val possibleMatroska = listOf(".mkv", ".mka", ".webm").any { entry.title.endsWith(it, ignoreCase = true) }
-        if (!showChapters || matroskaTried || !possibleMatroska || uri.scheme !in listOf("content", "file")) return@LaunchedEffect
-        matroskaTried = true
-        matroskaLoading = true
-        matroskaError = false
+        val isMatroska = listOf(".mkv", ".mka", ".webm").any { entry.title.endsWith(it, ignoreCase = true) }
+        val isMp4 = listOf(".mp4", ".m4v", ".m4a").any { entry.title.endsWith(it, ignoreCase = true) }
+        if (!showChapters || embeddedTried || (!isMatroska && !isMp4) || uri.scheme !in listOf("content", "file")) return@LaunchedEffect
+        embeddedTried = true
+        embeddedLoading = true
+        embeddedError = false
         try {
-            matroskaChapters = withContext(Dispatchers.IO) {
+            embeddedChapters = withContext(Dispatchers.IO) {
                 val asset = activity.contentResolver.openAssetFileDescriptor(uri, "r") ?: throw java.io.IOException("no descriptor")
                 asset.use { descriptor ->
                     descriptor.createInputStream().use { stream ->
                         val channel = stream.channel
                         val offset = descriptor.startOffset
                         val length = descriptor.declaredLength.takeIf { it >= 0 } ?: (channel.size() - offset)
-                        readMatroskaChapters(channel, offset, length)
+                        if (isMatroska) readMatroskaChapters(channel, offset, length) else readMp4Chapters(channel, offset, length)
                     }
                 }
             }
         } catch (e: CancellationException) {
-            matroskaTried = false
+            embeddedTried = false
             throw e
-        } catch (_: Exception) { matroskaError = true }
-        finally { matroskaLoading = false }
+        } catch (_: Exception) { embeddedError = true }
+        finally { embeddedLoading = false }
     }
     val latestOnPosition by rememberUpdatedState(onPosition)
     LaunchedEffect(player) {
@@ -318,20 +319,20 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         }
     }
     if (showChapters && !locked && !inPip) {
-        val displayedChapters = externalChapters ?: matroskaChapters.ifEmpty { chapters }
+        val displayedChapters = externalChapters ?: embeddedChapters.ifEmpty { chapters }
         AlertDialog(onDismissRequest = { showChapters = false }, title = { Text("الفصول") }, text = {
             Column {
                 Text(if (externalChapters != null) "فصول WebVTT مختارة لهذه الجلسة" else "الفصول المضمّنة المتاحة؛ يمكن اختيار ملف WebVTT بدلاً منها.")
-                if (matroskaLoading) Text("جارٍ قراءة فصول الملف…")
-                if (matroskaError) {
-                    Text("تعذرت قراءة فصول Matroska؛ قد لا يدعم مصدر الملف القراءة العشوائية.", color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = { matroskaTried = false; matroskaRetry++ }) { Text("إعادة محاولة قراءة الفصول") }
+                if (embeddedLoading) Text("جارٍ قراءة فصول الملف…")
+                if (embeddedError) {
+                    Text("تعذرت قراءة الفصول المضمّنة؛ قد لا يدعم المصدر القراءة العشوائية أو صيغة الفصول.", color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { embeddedTried = false; embeddedRetry++ }) { Text("إعادة محاولة قراءة الفصول") }
                 }
                 TextButton(enabled = !chapterLoading, onClick = { showChapters = false; chapterPicker.launch(arrayOf("*/*")) }) { Text("اختيار ملف فصول WebVTT") }
                 if (externalChapters != null) TextButton(enabled = !chapterLoading, onClick = { externalChapters = null; chapterError = null }) { Text("إزالة ملف الفصول") }
                 if (chapterLoading) { CircularProgressIndicator(); Text("جارٍ قراءة الفصول…") }
                 chapterError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                if (displayedChapters.isEmpty() && !chapterLoading) Text("لا توجد فصول متاحة. فصول M4V المضمّنة غير مدعومة حالياً.")
+                if (displayedChapters.isEmpty() && !chapterLoading) Text("لا توجد فصول مدعومة في الملف. يمكن اختيار ملف WebVTT للفصول.")
                 else androidx.compose.foundation.lazy.LazyColumn {
                     items(displayedChapters.size) { index ->
                         val chapter = displayedChapters[index]
