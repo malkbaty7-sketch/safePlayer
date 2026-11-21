@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101b1a"><title>SafePlayer | مساحتك للصوت والفيديو</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" class="icons" aria-hidden="true">
+<symbol id="grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol>
+<symbol id="music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13M9 9l11-2"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
+<symbol id="video" viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="14" rx="2"/><path d="m17 10 4-3v10l-4-3z"/></symbol>
+<symbol id="logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M13 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></symbol>
+<symbol id="arrow" viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></symbol>
+<symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3"/></symbol>
+<symbol id="shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></symbol>
+</svg>
+<div id="app">
+  <aside class="sidebar">
+    <a class="brand" href="#library" aria-label="SafePlayer الرئيسية"><span class="brand-icon"><svg><use href="#play"/></svg></span><span><strong>SafePlayer</strong><small>مساحتك الآمنة</small></span></a>
+    <div class="nav-label">القائمة الرئيسية</div>
+    <nav aria-label="التنقل الرئيسي"><a href="#library" data-page="library" class="nav-link"><svg><use href="#grid"/></svg> مكتبتي <span class="nav-dot"></span></a><a href="#favorites" data-page="favorites" class="nav-link"><svg><use href="#heart"/></svg> المفضلة</a></nav>
+    <div class="side-bottom"><div class="privacy"><span class="privacy-icon"><svg><use href="#shield"/></svg></span><div><strong>خصوصيتك أولاً</strong><p>ملفاتك تبقى على جهازك، دائماً.</p></div></div><button id="accountButton" class="account"><span class="avatar" id="avatar">ض</span><span class="account-text"><strong id="accountName">حساب الضيف</strong><small id="accountHint">سجّل الدخول لحفظ مفضلتك</small></span><svg><use href="#arrow"/></svg></button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="mobile-brand">SafePlayer <span>●</span></div><div class="top-welcome">أهلاً بك في مساحتك الخاصة <span>✦</span></div><div class="top-actions"><span class="local-badge"><span></span> مكتبتك المحلية</span><button class="icon-button" id="topAccount" aria-label="الحساب"><span id="topAvatar">ض</span></button></div></header>
+    <div class="content">
+      <div class="breadcrumb">الرئيسية <span>/</span> <strong id="crumb">مكتبتي</strong></div>
+      <section class="hero"><div class="hero-copy"><div class="eyebrow"><span>✦</span> مساحتك، على طريقتك</div><h1>كل ما تحب، <em>في مكان واحد.</em></h1><p>مكتبتك الخاصة للصوت والفيديو. أضف ملفاتك، رتّب مفضلتك، واستمتع بتجربة تشغيل بسيطة وآمنة.</p><button class="primary" id="heroAdd"><svg><use href="#plus"/></svg> أضف ملفاتك <span>←</span></button><div class="hero-note"><svg><use href="#shield"/></svg> ملفاتك محفوظة على جهازك فقط</div></div><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-disc"><div class="disc-inner"><div class="disc-core"><svg><use href="#play"/></svg></div></div></div><div class="art-note note-one">♫</div><div class="art-note note-two">♪</div><div class="art-spark">✳</div><div class="art-card"><span>♫</span><div><i></i><i></i></div><b>♥</b></div></div></section>
+      <section class="library-section" aria-labelledby="pageTitle"><div class="section-head"><div><div class="section-kicker">مجموعتك الخاصة <span>✦</span></div><h2 id="pageTitle">مكتبتي <span id="count" class="count">٠</span></h2><p id="pageDescription">كل ملفاتك المفضلة، جاهزة للتشغيل في أي وقت.</p></div><button class="outline" id="sectionAdd"><svg><use href="#plus"/></svg> إضافة ملفات</button></div>
+      <div class="toolbar"><label class="search"><svg><use href="#search"/></svg><input id="search" type="search" placeholder="ابحث في مكتبتك..." aria-label="ابحث في مكتبتك"><kbd>⌘ K</kbd></label><div class="filters" role="group" aria-label="تصفية نوع الملفات"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="audio">صوتيات</button><button class="filter" data-filter="video">فيديو</button></div><label class="sort-label">ترتيب حسب <select id="sort" aria-label="ترتيب الملفات"><option value="new">الأحدث إضافة</option><option value="name">الاسم</option><option value="old">الأقدم إضافة</option></select></label></div>
+      <div id="status" class="status" role="status" aria-live="polite"></div><div id="mediaGrid" class="media-grid"></div>
+      </section>
+      <footer><span>صُنع بكل حب لتجربة أكثر هدوءاً <span class="footer-heart">♥</span></span><span dir="ltr">SafePlayer © 2026</span></footer>
+    </div>
+  </main>
+  <nav class="mobile-nav" aria-label="التنقل على الهاتف"><a href="#library" data-page="library"><svg><use href="#grid"/></svg> مكتبتي</a><a href="#favorites" data-page="favorites"><svg><use href="#heart"/></svg> المفضلة</a><button id="mobileAccount"><span>◉</span> حسابي</button></nav>
+</div>
+<input type="file" id="fileInput" accept="audio/*,video/*" multiple hidden>
+<dialog id="authDialog"><div class="dialog-head"><div><span class="section-kicker">أهلاً بك في SafePlayer</span><h2 id="authTitle">تسجيل الدخول</h2></div><button class="close" data-close="authDialog" aria-label="إغلاق">×</button></div><p class="dialog-desc">حساب محلي على هذا المتصفح لتنظيم مفضلتك. لا يتم إرسال بياناتك إلى خادم.</p><form id="authForm"><label>اسم المستخدم<input id="username" autocomplete="username" required minlength="2" maxlength="30" placeholder="أدخل اسم المستخدم"></label><label>كلمة المرور<input id="password" type="password" autocomplete="current-password" required minlength="8" placeholder="٨ أحرف على الأقل"></label><p id="authError" class="form-error" role="alert"></p><button class="primary full" type="submit" id="authSubmit">تسجيل الدخول</button></form><button class="text-button" id="authToggle">ليس لديك حساب؟ أنشئ حساباً</button></dialog>
+<dialog id="playerDialog"><div class="dialog-head"><div><span class="section-kicker">قيد التشغيل الآن</span><h2 id="playerTitle" dir="auto"></h2></div><button class="close" data-close="playerDialog" aria-label="إغلاق المشغل">×</button></div><div id="playerContainer"></div><p id="playerError" class="form-error" role="alert"></p></dialog>
+<script src="app.js"></script>
+</body></html>
