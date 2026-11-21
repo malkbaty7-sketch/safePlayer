@@ -34,6 +34,31 @@ class MediaScanner(private val context: Context, private val dao: MediaDao) {
         return Access(fullVideo || selected, granted(Manifest.permission.READ_MEDIA_AUDIO), !fullVideo && selected)
     }
 
+    class FullAccessRequired : Exception()
+
+    /** Read-only comparison. Missing results can also mean an unavailable volume, not deletion. */
+    suspend fun findUnavailable(entries: List<MediaEntry>): List<MediaEntry> = withContext(Dispatchers.IO) {
+        fun requireFullAccess() {
+            val access = access()
+            if (!access.video || !access.audio || access.limitedVideo) throw FullAccessRequired()
+        }
+        requireFullAccess()
+        val visible = HashSet<String>()
+        for (collection in listOf(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)) {
+            val cursor = context.contentResolver.query(collection, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
+                ?: throw IllegalStateException("MediaStore query returned no cursor")
+            cursor.use {
+                val id = it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                while (it.moveToNext()) {
+                    currentCoroutineContext().ensureActive()
+                    visible.add(ContentUris.withAppendedId(collection, it.getLong(id)).toString())
+                }
+            }
+        }
+        requireFullAccess()
+        unavailableMediaStoreEntries(entries, visible)
+    }
+
     suspend fun scan(access: Access): Result = withContext(Dispatchers.IO) {
         var found = 0
         var added = 0
@@ -75,4 +100,18 @@ class MediaScanner(private val context: Context, private val dao: MediaDao) {
         ThumbnailLoader.clearIfCreated()
         Result(found, added)
     }
+}
+
+/** Select only canonical external MediaStore rows; never infer absence of SAF documents. */
+fun unavailableMediaStoreEntries(entries: List<MediaEntry>, visibleUris: Set<String>): List<MediaEntry> {
+    val video = Regex("content://media/external/video/media/[0-9]+")
+    val audio = Regex("content://media/external/audio/media/[0-9]+")
+    return entries.filter { entry ->
+        val canonical = when (entry.type) {
+            "video" -> video.matches(entry.uri)
+            "audio" -> audio.matches(entry.uri)
+            else -> false
+        }
+        canonical && entry.uri !in visibleUris
+    }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
 }
