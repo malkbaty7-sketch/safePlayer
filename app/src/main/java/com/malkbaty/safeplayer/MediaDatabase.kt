@@ -29,6 +29,9 @@ interface MediaDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(entry: MediaEntry)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(entries: List<MediaEntry>): List<Long>
+
     @Query("UPDATE media SET favorite = :favorite WHERE uri = :uri")
     suspend fun setFavorite(uri: String, favorite: Boolean)
 
