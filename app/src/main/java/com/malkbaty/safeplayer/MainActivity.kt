@@ -1,6 +1,9 @@
 package com.malkbaty.safeplayer
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -26,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
@@ -86,6 +90,17 @@ class MainActivity : ComponentActivity() {
         var message by remember { mutableStateOf<String?>(null) }
         var pendingDelete by remember { mutableStateOf<MediaEntry?>(null) }
         var scanning by remember { mutableStateOf(false) }
+        val notifications = remember { ScanNotifications(applicationContext) }
+        var notificationsEnabled by remember { mutableStateOf(notifications.enabled && notifications.allowed()) }
+        val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notifications.enabled = granted && notifications.allowed()
+            notificationsEnabled = notifications.enabled
+            message = if (notificationsEnabled) "تم تفعيل إشعارات الفحص." else "لم يُمنح إذن الإشعارات. يمكن تفعيله من إعدادات الجهاز."
+        }
+        val cloud = remember { CloudRepository(applicationContext) }
+        var showCloud by remember { mutableStateOf(false) }
+        var pendingUpload by remember { mutableStateOf<MediaEntry?>(null) }
+        var uploading by remember { mutableStateOf(false) }
         val scanner = repository.scanner
         fun startScan() {
             val access = scanner.access()
@@ -98,6 +113,7 @@ class MainActivity : ComponentActivity() {
                 message = null
                 try {
                     val result = scanner.scan(access)
+                    notifications.show(result)
                     val scopeNote = if (!access.video || !access.audio || access.limitedVideo) " الفحص يشمل الوسائط المسموح بها فقط." else ""
                     message = "اكتمل الفحص: ${result.found} ملف، أُضيف منها ${result.added}.$scopeNote"
                 } catch (cancelled: CancellationException) {
@@ -130,7 +146,8 @@ class MainActivity : ComponentActivity() {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
                     OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
-                    TextButton(onClick = { showSettings = true }) { Text("المظهر") }
+                    TextButton(onClick = { showSettings = true }) { Text("الإعدادات") }
+                    TextButton(onClick = { showCloud = true }) { Text("السحابة") }
                 }
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     OutlinedButton(enabled = !scanning, onClick = { permissionLauncher.launch(scanner.permissions()) }) { Text("فحص وسائط الجهاز") }
@@ -167,10 +184,11 @@ class MainActivity : ComponentActivity() {
                             Column(Modifier.padding(14.dp)) {
                                 Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                                 Text(if (entry.type == "video") "فيديو" else "صوت", style = MaterialTheme.typography.bodySmall)
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(onClick = { playing = entry }) { Text("تشغيل") }
-                                    TextButton(onClick = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite) } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } }) { Text(if (entry.favorite) "إزالة المفضلة" else "إضافة للمفضلة") }
+                                    TextButton(onClick = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } }) { Text(if (entry.favorite) "إزالة المفضلة" else "إضافة للمفضلة") }
                                     TextButton(onClick = { pendingDelete = entry }) { Text("حذف") }
+                                    if (entry.type == "video") TextButton(enabled = !uploading, onClick = { pendingUpload = entry }) { Text("حفظ سحابي") }
                                 }
                             }
                         }
@@ -192,8 +210,33 @@ class MainActivity : ComponentActivity() {
                         Checkbox(checked = dark, onCheckedChange = { onTheme(palette, it) })
                         Text("الوضع الداكن")
                     }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = notificationsEnabled, onCheckedChange = { enable ->
+                            if (!enable) { notifications.enabled = false; notificationsEnabled = false }
+                            else if (Build.VERSION.SDK_INT >= 33 && !notifications.allowed()) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            else if (notifications.allowed()) { notifications.enabled = true; notificationsEnabled = true }
+                            else message = "فعّل الإشعارات من إعدادات الجهاز."
+                        })
+                        Text("إشعار عند اكتمال الفحص")
+                    }
                 }
             }, confirmButton = { TextButton(onClick = { showSettings = false }) { Text("تم") } })
+        }
+        if (showCloud) CloudDialog(cloud, onClose = { showCloud = false })
+        pendingUpload?.let { entry ->
+            AlertDialog(onDismissRequest = { pendingUpload = null }, title = { Text("حفظ بيانات الفيديو سحابياً؟") },
+                text = { Text("سيُرسل العنوان وحالة المفضلة إلى Firebase، دون الملف أو مساره. الحساب المجهول مرتبط بهذا التثبيت وقد تفقد الوصول عند مسح بياناته. قد يؤدي التكرار إلى إنشاء نسخ متعددة.") },
+                confirmButton = { TextButton(onClick = {
+                    pendingUpload = null
+                    scope.launch {
+                        uploading = true; message = "جارٍ حفظ بيانات الفيديو سحابياً…"
+                        try { cloud.save(entry); message = "تم حفظ بيانات الفيديو سحابياً." }
+                        catch (_: TimeoutCancellationException) { message = "انتهت مهلة الحفظ وقد يكتمل لاحقاً. تحقق من السحابة قبل إعادة المحاولة." }
+                        catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { message = "تعذر الحفظ السحابي. تحقق من إعداد Firebase والاتصال وقواعد الأمان وحاول مجدداً." }
+                        finally { uploading = false }
+                    }
+                }) { Text("إرسال") } }, dismissButton = { TextButton(onClick = { pendingUpload = null }) { Text("إلغاء") } })
         }
         pendingDelete?.let { entry ->
             AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك، وقد يظهر مجدداً عند فحص الوسائط.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { repository.remove(entry.uri) } catch (_: Exception) { message = "تعذرت إزالة الملف. حاول مجدداً." } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
