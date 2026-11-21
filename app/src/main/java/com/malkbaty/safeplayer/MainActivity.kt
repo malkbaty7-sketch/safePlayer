@@ -3,6 +3,7 @@ package com.malkbaty.safeplayer
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.content.res.Configuration
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -23,23 +24,37 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.room.Room
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+
+private sealed interface LibraryState {
+    data object Loading : LibraryState
+    data object Error : LibraryState
+    data class Ready(val entries: List<MediaEntry>) : LibraryState
+}
 
 class MainActivity : ComponentActivity() {
+    private var inPip by mutableStateOf(false)
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip = isInPictureInPictureMode
+    }
     private val database by lazy { Room.databaseBuilder(applicationContext, MediaDatabase::class.java, "safeplayer.db").build() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
+            val prefs = remember { getSharedPreferences("appearance", MODE_PRIVATE) }
+            var palette by remember { mutableStateOf(Palette.entries.find { it.name == prefs.getString("palette", "FOREST") } ?: Palette.FOREST) }
+            var dark by remember { mutableStateOf(prefs.getBoolean("dark", false)) }
+            SafePlayerTheme(palette, dark) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    SafePlayerApp(database.mediaDao())
+                    SafePlayerApp(database.mediaDao(), palette, dark) { selected, isDark ->
+                        palette = selected
+                        dark = isDark
+                        prefs.edit().putString("palette", selected.name).putBoolean("dark", isDark).apply()
+                    }
                 }
             }
         }
@@ -50,9 +65,16 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SafePlayerApp(dao: MediaDao) {
+    private fun SafePlayerApp(dao: MediaDao, palette: Palette, dark: Boolean, onTheme: (Palette, Boolean) -> Unit) {
         val scope = rememberCoroutineScope()
-        val entries by dao.observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
+        var retry by remember { mutableIntStateOf(0) }
+        val libraryFlow = remember(dao, retry) {
+            dao.observeAll().map<List<MediaEntry>, LibraryState> { LibraryState.Ready(it) }
+                .catch { emit(LibraryState.Error) }
+        }
+        val library by libraryFlow.collectAsStateWithLifecycle(initialValue = LibraryState.Loading)
+        val entries = (library as? LibraryState.Ready)?.entries.orEmpty()
+        var showSettings by remember { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
         var type by rememberSaveable { mutableStateOf("all") }
         var favorites by rememberSaveable { mutableStateOf(false) }
@@ -80,9 +102,9 @@ class MainActivity : ComponentActivity() {
         val current = playing
         if (current != null) {
             BackHandler { playing = null }
-            PlayerScreen(current, onBack = { playing = null }, onPosition = { position ->
+            PlayerScreen(this, current, inPip, onBack = { playing = null }, onPosition = { position ->
                 // Activity lifecycle scope survives disposal of the player composable.
-                lifecycleScope.launch { dao.savePosition(current.uri, position) }
+                lifecycleScope.launch { try { dao.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
             })
         } else {
             Column(Modifier.fillMaxSize().padding(20.dp)) {
@@ -93,6 +115,7 @@ class MainActivity : ComponentActivity() {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
                     OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
+                    TextButton(onClick = { showSettings = true }) { Text("المظهر") }
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("البحث في المكتبة") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -103,7 +126,12 @@ class MainActivity : ComponentActivity() {
                 }
                 message?.let { Text(it, color = MaterialTheme.colorScheme.primary); TextButton(onClick = { message = null }) { Text("إغلاق الرسالة") } }
                 val filtered = filterMedia(entries, query, type, favorites)
-                if (filtered.isEmpty()) {
+                if (library is LibraryState.Loading) {
+                    Spacer(Modifier.height(32.dp)); CircularProgressIndicator(); Text("جارٍ تحميل المكتبة…")
+                } else if (library is LibraryState.Error) {
+                    Spacer(Modifier.height(32.dp)); Text("تعذر تحميل المكتبة. حاول مجدداً.", color = MaterialTheme.colorScheme.error)
+                    Button(onClick = { retry++ }) { Text("إعادة المحاولة") }
+                } else if (filtered.isEmpty()) {
                     Spacer(Modifier.height(32.dp))
                     Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة. غيّر البحث أو الفلتر.")
                 } else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
@@ -123,40 +151,26 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        if (showSettings) {
+            AlertDialog(onDismissRequest = { showSettings = false }, title = { Text("المظهر") }, text = {
+                Column {
+                    Text("الألوان")
+                    Palette.entries.forEach { item ->
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            RadioButton(selected = palette == item, onClick = { onTheme(item, dark) })
+                            Text(item.label)
+                        }
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = dark, onCheckedChange = { onTheme(palette, it) })
+                        Text("الوضع الداكن")
+                    }
+                }
+            }, confirmButton = { TextButton(onClick = { showSettings = false }) { Text("تم") } })
+        }
         pendingDelete?.let { entry ->
             AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { dao.delete(entry.uri); try { contentResolver.releasePersistableUriPermission(Uri.parse(entry.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {} } catch (_: Exception) { message = "تعذرت إزالة الملف. حاول مجدداً." } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
         }
     }
 
-    @Composable
-    private fun PlayerScreen(entry: MediaEntry, onBack: () -> Unit, onPosition: (Long) -> Unit) {
-        var error by remember(entry.uri) { mutableStateOf<String?>(null) }
-        var attempt by remember(entry.uri) { mutableIntStateOf(0) }
-        val player = remember(entry.uri, attempt) {
-            ExoPlayer.Builder(this).build().apply {
-                setMediaItem(MediaItem.fromUri(Uri.parse(entry.uri)))
-                seekTo(entry.positionMs)
-                prepare()
-                playWhenReady = true
-            }
-        }
-        DisposableEffect(player) {
-            val listener = object : Player.Listener {
-                override fun onPlayerError(playbackError: PlaybackException) { error = "تعذر تشغيل الملف. تحقق من إمكانية الوصول إليه ودعم صيغته." }
-            }
-            player.addListener(listener)
-            onDispose {
-                val position = if (player.playbackState == Player.STATE_ENDED) 0L else player.currentPosition.coerceAtLeast(0)
-                onPosition(position)
-                player.removeListener(listener)
-                player.release()
-            }
-        }
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
-            TextButton(onClick = onBack) { Text("← رجوع إلى المكتبة") }
-            Text(entry.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            AndroidView(factory = { context -> PlayerView(context).apply { this.player = player } }, update = { it.player = player }, modifier = Modifier.fillMaxWidth().weight(1f))
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error); Button(onClick = { error = null; attempt++ }) { Text("إعادة المحاولة") } }
-        }
-    }
 }
