@@ -36,6 +36,9 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
 fun subtitleMime(name: String): String? = when {
     name.endsWith(".srt", ignoreCase = true) -> MimeTypes.APPLICATION_SUBRIP
@@ -53,6 +56,10 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var showMore by remember { mutableStateOf(false) }
     var showChapters by remember { mutableStateOf(false) }
     var chapters by remember(entry.uri) { mutableStateOf<List<PlaybackChapter>>(emptyList()) }
+    var externalChapters by remember(entry.uri) { mutableStateOf<List<PlaybackChapter>?>(null) }
+    var chapterSelection by remember(entry.uri) { mutableStateOf<Pair<Uri, Int>?>(null) }
+    var chapterLoading by remember(entry.uri) { mutableStateOf(false) }
+    var chapterError by remember(entry.uri) { mutableStateOf<String?>(null) }
     var showTracks by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
     var audioSessionId by remember(entry.uri) { mutableIntStateOf(C.AUDIO_SESSION_ID_UNSET) }
@@ -104,6 +111,38 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             if (mime == null) { fileError = false; error = "اختر ملف ترجمة بصيغة SRT أو VTT." }
             else { error = null; applySubtitle(uri to mime) }
         }
+    }
+    val chapterPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            chapterSelection = uri to ((chapterSelection?.second ?: 0) + 1)
+            showChapters = true
+        }
+    }
+    LaunchedEffect(chapterSelection, entry.uri) {
+        val selected = chapterSelection ?: return@LaunchedEffect
+        chapterLoading = true
+        chapterError = null
+        try {
+            val parsed = withContext(Dispatchers.IO) {
+                val stream = activity.contentResolver.openInputStream(selected.first) ?: throw java.io.IOException("no stream")
+                val bytes = stream.use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val read = input.read(buffer, 0, minOf(buffer.size, MAX_CHAPTER_FILE_BYTES + 1 - output.size()))
+                        if (read < 0) break
+                        if (read == 0) throw java.io.IOException("empty read")
+                        output.write(buffer, 0, read)
+                        if (output.size() > MAX_CHAPTER_FILE_BYTES) throw java.io.IOException("file too large")
+                    }
+                    output.toByteArray()
+                }
+                parseWebVttChapters(bytes)
+            }
+            externalChapters = parsed
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { chapterError = "تعذرت قراءة ملف الفصول. اختر ملف WebVTT صالحاً لا يتجاوز 512 كيلوبايت." }
+        finally { chapterLoading = false }
     }
     val latestOnPosition by rememberUpdatedState(onPosition)
     LaunchedEffect(player) {
@@ -217,7 +256,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                     DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
                         if (entry.type == "video") DropdownMenuItem(text = { Text(if (covered) "إظهار الفيديو" else "إخفاء الفيديو") }, onClick = { covered = !covered; gestureMessage = null; showMore = false })
                         DropdownMenuItem(text = { Text("السرعة ${speed}×") }, onClick = { showMore = false; showSpeed = true })
-                        DropdownMenuItem(text = { Text("الفصول (ID3)") }, onClick = { showMore = false; showChapters = true })
+                        DropdownMenuItem(text = { Text("الفصول") }, onClick = { showMore = false; showChapters = true })
                         DropdownMenuItem(text = { Text("معادل الصوت") }, onClick = { showMore = false; showEqualizer = true })
                         if (entry.type == "video") {
                             DropdownMenuItem(text = { Text("إضافة ترجمة") }, onClick = { showMore = false; picker.launch(arrayOf("*/*")) })
@@ -249,14 +288,22 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         }
     }
     if (showChapters && !locked && !inPip) {
+        val displayedChapters = externalChapters ?: chapters
         AlertDialog(onDismissRequest = { showChapters = false }, title = { Text("الفصول") }, text = {
-            if (chapters.isEmpty()) Text("لم تتوفر فصول ID3 لهذا الملف. لا يدعم التطبيق حالياً فصول MKV أو M4V.")
-            else androidx.compose.foundation.lazy.LazyColumn {
-                items(chapters.size) { index ->
-                    val chapter = chapters[index]
-                    TextButton(enabled = player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM), onClick = {
-                        player.seekTo(chapter.startMs); showChapters = false
-                    }) { Text("${chapter.title} — ${formatPlaybackTime(chapter.startMs)}") }
+            Column {
+                Text(if (externalChapters != null) "فصول WebVTT مختارة لهذه الجلسة" else "فصول ID3 إن توفرت؛ يمكن اختيار ملف WebVTT للفصول.")
+                TextButton(enabled = !chapterLoading, onClick = { showChapters = false; chapterPicker.launch(arrayOf("*/*")) }) { Text("اختيار ملف فصول WebVTT") }
+                if (externalChapters != null) TextButton(enabled = !chapterLoading, onClick = { externalChapters = null; chapterError = null }) { Text("إزالة ملف الفصول") }
+                if (chapterLoading) { CircularProgressIndicator(); Text("جارٍ قراءة الفصول…") }
+                chapterError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (displayedChapters.isEmpty() && !chapterLoading) Text("لا توجد فصول متاحة. لا تُقرأ فصول MKV أو M4V المضمّنة حالياً.")
+                else androidx.compose.foundation.lazy.LazyColumn {
+                    items(displayedChapters.size) { index ->
+                        val chapter = displayedChapters[index]
+                        TextButton(enabled = player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) && (durationMs <= 0 || chapter.startMs < durationMs), onClick = {
+                            player.seekTo(chapter.startMs); showChapters = false
+                        }) { Text("${chapter.title} — ${formatPlaybackTime(chapter.startMs)}") }
+                    }
                 }
             }
         }, confirmButton = { TextButton(onClick = { showChapters = false }) { Text("إغلاق") } })
