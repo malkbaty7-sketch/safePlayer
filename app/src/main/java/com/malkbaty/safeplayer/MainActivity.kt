@@ -92,6 +92,8 @@ class MainActivity : ComponentActivity() {
         var showSort by remember { mutableStateOf(false) }
         var gridView by rememberSaveable { mutableStateOf(true) }
         var playing by remember { mutableStateOf<MediaEntry?>(null) }
+        var isNetworkStream by remember { mutableStateOf(false) }
+        var showStreamDialog by remember { mutableStateOf(false) }
         var message by remember { mutableStateOf<String?>(null) }
         var pendingDelete by remember { mutableStateOf<MediaEntry?>(null) }
         var scanning by remember { mutableStateOf(false) }
@@ -158,12 +160,13 @@ class MainActivity : ComponentActivity() {
         }
         val current = playing
         if (current != null) {
+            val stream = isNetworkStream
             BackHandler { playing = null }
             PlayerScreen(this, current, inPip, onBack = { playing = null }, onStarted = {
-                lifecycleScope.launch { try { repository.markPlayed(current.uri, System.currentTimeMillis()) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ سجل التشغيل." } }
+                if (!stream) lifecycleScope.launch { try { repository.markPlayed(current.uri, System.currentTimeMillis()) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ سجل التشغيل." } }
             }, onPosition = { position ->
                 // Activity lifecycle scope survives disposal of the player composable.
-                lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
+                if (!stream) lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
             })
         } else {
             val filtered = searchLibrary(entries, LibraryQuery(query, type, favorites, sort))
@@ -182,6 +185,7 @@ class MainActivity : ComponentActivity() {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
                             OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
+                            TextButton(onClick = { showStreamDialog = true }) { Text("بث الشبكة") }
                             TextButton(onClick = { showSettings = true }) { Text("الإعدادات") }
                             TextButton(onClick = { showCloud = true }) { Text("السحابة") }
                         }
@@ -219,7 +223,7 @@ class MainActivity : ComponentActivity() {
                                 Column(Modifier.padding(14.dp)) {
                                     Text("استكمال المشاهدة", style = MaterialTheme.typography.titleMedium)
                                     Text(recent.title, maxLines = 1)
-                                    TextButton(onClick = { playing = recent }) { Text("استكمال من ${formatPlaybackTime(recent.positionMs)}") }
+                                    TextButton(onClick = { isNetworkStream = false; playing = recent }) { Text("استكمال من ${formatPlaybackTime(recent.positionMs)}") }
                                 }
                             }
                         }
@@ -230,13 +234,18 @@ class MainActivity : ComponentActivity() {
                     library is LibraryState.Error -> item(span = { GridItemSpan(maxLineSpan) }) { Column { Text("تعذر تحميل المكتبة. حاول مجدداً.", color = MaterialTheme.colorScheme.error); Button(onClick = { retry++ }) { Text("إعادة المحاولة") } } }
                     filtered.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة. غيّر البحث أو الفلتر.") }
                     else -> items(filtered, key = { it.uri }) { entry ->
-                        MediaCard(entry = entry, uploading = uploading, showThumbnails = showThumbnails, onPlay = { playing = entry },
+                        MediaCard(entry = entry, uploading = uploading, showThumbnails = showThumbnails, onPlay = { isNetworkStream = false; playing = entry },
                             onFavorite = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } },
                             onDelete = { pendingDelete = entry }, onCloud = { pendingUpload = entry })
                     }
                 }
             }
         }
+        if (showStreamDialog) NetworkStreamDialog(onDismiss = { showStreamDialog = false }, onPlay = { url ->
+            showStreamDialog = false
+            isNetworkStream = true
+            playing = MediaEntry(uri = url, title = "بث عبر الشبكة", type = "video", addedAt = 0)
+        })
         if (showSettings) {
             AlertDialog(onDismissRequest = { showSettings = false }, title = { Text("الإعدادات") }, text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {

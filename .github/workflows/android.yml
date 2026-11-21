@@ -18,7 +18,7 @@ jobs:
       - name: Build and test
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest 2>&1 | tee gradle-build.log
+          ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest bundleRelease 2>&1 | tee gradle-build.log
       - name: Annotate build failures
         if: failure()
         run: |
@@ -29,3 +29,7 @@ jobs:
         with:
           name: SafePlayer-debug
           path: app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SafePlayer-release-unsigned
+          path: app/build/outputs/bundle/release/*.aab

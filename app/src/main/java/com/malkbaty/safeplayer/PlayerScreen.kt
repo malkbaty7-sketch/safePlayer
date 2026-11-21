@@ -50,6 +50,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var locked by remember(entry.uri) { mutableStateOf(false) }
     var covered by remember(entry.uri) { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
+    var buffering by remember(entry.uri) { mutableStateOf(false) }
     var startedOnce by remember(entry.uri) { mutableStateOf(false) }
     var gestureMessage by remember { mutableStateOf<String?>(null) }
     var speed by remember { mutableFloatStateOf(1f) }
@@ -59,9 +60,11 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var scrub by remember(entry.uri) { mutableStateOf<Float?>(null) }
     val player = remember(entry.uri) {
         ExoPlayer.Builder(activity).build().apply {
-            setMediaItem(MediaItem.Builder().setUri(Uri.parse(entry.uri))
-                .setMediaMetadata(MediaMetadata.Builder().setTitle(entry.title).build()).build())
-            seekTo(entry.positionMs)
+            val builder = MediaItem.Builder().setUri(Uri.parse(entry.uri))
+                .setMediaMetadata(MediaMetadata.Builder().setTitle(entry.title).build())
+            streamMimeType(entry.uri)?.let { builder.setMimeType(it) }
+            setMediaItem(builder.build())
+            if (entry.positionMs > 0) seekTo(entry.positionMs)
             prepare()
             playWhenReady = true
         }
@@ -72,6 +75,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         val playing = player.playWhenReady
         val builder = MediaItem.Builder().setUri(Uri.parse(entry.uri))
             .setMediaMetadata(MediaMetadata.Builder().setTitle(entry.title).build())
+        streamMimeType(entry.uri)?.let { builder.setMimeType(it) }
         value?.let { (uri, mime) ->
             builder.setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(uri).setMimeType(mime).build()))
         }
@@ -112,7 +116,10 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         val initialBrightness = activity.window.attributes.screenBrightness
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing; if (playing) { startedOnce = true; latestOnStarted() } }
-            override fun onPlaybackStateChanged(playbackState: Int) { if (playbackState == Player.STATE_ENDED) latestOnPosition(0) }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                buffering = playbackState == Player.STATE_BUFFERING
+                if (playbackState == Player.STATE_ENDED) latestOnPosition(0)
+            }
             override fun onTracksChanged(value: Tracks) { tracks = value }
             override fun onPlaybackParametersChanged(parameters: androidx.media3.common.PlaybackParameters) { speed = parameters.speed }
             override fun onPlayerError(playbackError: PlaybackException) { error = "تعذر تشغيل الملف أو الترجمة. تحقق من الوصول والصيغة ثم حاول مجدداً." }
@@ -123,6 +130,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         player.addListener(listener)
         tracks = player.currentTracks
         isPlaying = player.isPlaying
+        buffering = player.playbackState == Player.STATE_BUFFERING
         if (player.isPlaying) { startedOnce = true; latestOnStarted() }
         owner.lifecycle.addObserver(observer)
         onDispose {
@@ -153,6 +161,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                     it.onGestureMessage = { message -> gestureMessage = message }
                 }, modifier = Modifier.fillMaxSize())
             }
+            if (buffering && !covered) CircularProgressIndicator(Modifier.align(Alignment.Center))
             gestureMessage?.let { Text(it, modifier = Modifier.align(Alignment.Center), color = androidx.compose.ui.graphics.Color.White) }
         }
         if (!inPip) {
