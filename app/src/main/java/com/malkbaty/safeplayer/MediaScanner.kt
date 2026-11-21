@@ -45,7 +45,9 @@ class MediaScanner(private val context: Context, private val dao: MediaDao) {
             cursor.use {
                 val idIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                 val nameIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                val dateIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE, "duration")
+                val dateIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                val sizeIndex = it.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                val durationIndex = it.getColumnIndexOrThrow("duration")
                 val batch = ArrayList<MediaEntry>(100)
                 suspend fun flush() {
                     if (batch.isNotEmpty()) {
