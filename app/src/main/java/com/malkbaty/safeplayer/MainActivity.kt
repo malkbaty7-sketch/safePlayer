@@ -57,10 +57,14 @@ class MainActivity : ComponentActivity() {
             val appearance = remember { settings.appearance() }
             var palette by remember { mutableStateOf(appearance.palette) }
             var dark by remember { mutableStateOf(appearance.dark) }
+            var showThumbnails by remember { mutableStateOf(settings.showThumbnails()) }
             SafePlayerTheme(palette, dark) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    SafePlayerApp(repository, palette, dark) { selected, isDark ->
+                    SafePlayerApp(repository, palette, dark, showThumbnails, onThumbnails = { show ->
+                        showThumbnails = show
+                        settings.setShowThumbnails(show)
+                    }) { selected, isDark ->
                         palette = selected
                         dark = isDark
                         settings.saveAppearance(Appearance(selected, isDark))
@@ -71,7 +75,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun SafePlayerApp(repository: MediaRepository, palette: Palette, dark: Boolean, onTheme: (Palette, Boolean) -> Unit) {
+    private fun SafePlayerApp(repository: MediaRepository, palette: Palette, dark: Boolean, showThumbnails: Boolean, onThumbnails: (Boolean) -> Unit, onTheme: (Palette, Boolean) -> Unit) {
         val scope = rememberCoroutineScope()
         var retry by remember { mutableIntStateOf(0) }
         val libraryFlow = remember(repository, retry) {
@@ -211,7 +215,7 @@ class MainActivity : ComponentActivity() {
                     library is LibraryState.Error -> item(span = { GridItemSpan(maxLineSpan) }) { Column { Text("تعذر تحميل المكتبة. حاول مجدداً.", color = MaterialTheme.colorScheme.error); Button(onClick = { retry++ }) { Text("إعادة المحاولة") } } }
                     filtered.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة. غيّر البحث أو الفلتر.") }
                     else -> items(filtered, key = { it.uri }) { entry ->
-                        MediaCard(entry = entry, uploading = uploading, onPlay = { playing = entry },
+                        MediaCard(entry = entry, uploading = uploading, showThumbnails = showThumbnails, onPlay = { playing = entry },
                             onFavorite = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } },
                             onDelete = { pendingDelete = entry }, onCloud = { pendingUpload = entry })
                     }
@@ -232,6 +236,11 @@ class MainActivity : ComponentActivity() {
                         Checkbox(checked = dark, onCheckedChange = { onTheme(palette, it) })
                         Text("الوضع الداكن")
                     }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = showThumbnails, onCheckedChange = onThumbnails)
+                        Text("عرض صور الفيديو المصغّرة")
+                    }
+                    Text("قد تعرض الصور محتوى الفيديو دون تصفية.", style = MaterialTheme.typography.bodySmall)
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Checkbox(checked = notificationsEnabled, onCheckedChange = { enable ->
                             if (!enable) { notifications.enabled = false; notificationsEnabled = false }

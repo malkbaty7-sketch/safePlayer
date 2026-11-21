@@ -27,10 +27,11 @@ import kotlinx.coroutines.withContext
 
 /** Thumbnails are best effort and local-only; SAF providers and older devices may not supply them. */
 @Composable
-fun MediaCard(entry: MediaEntry, uploading: Boolean, onPlay: () -> Unit, onFavorite: () -> Unit, onDelete: () -> Unit, onCloud: () -> Unit) {
+fun MediaCard(entry: MediaEntry, uploading: Boolean, showThumbnails: Boolean = true, onPlay: () -> Unit, onFavorite: () -> Unit, onDelete: () -> Unit, onCloud: () -> Unit) {
     val context = LocalContext.current
-    val thumbnail by produceState<Bitmap?>(null, entry.uri, entry.type) {
-        if (entry.type == "video" && Build.VERSION.SDK_INT >= 29) {
+    val thumbnail by produceState<Bitmap?>(null, entry.uri, entry.type, showThumbnails) {
+        value = null
+        if (showThumbnails && entry.type == "video" && Build.VERSION.SDK_INT >= 29) {
             value = withContext(Dispatchers.IO) {
                 try { context.contentResolver.loadThumbnail(Uri.parse(entry.uri), Size(320, 180), null) }
                 catch (_: Exception) { null }
@@ -43,7 +44,7 @@ fun MediaCard(entry: MediaEntry, uploading: Boolean, onPlay: () -> Unit, onFavor
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
     ) {
         Box(Modifier.fillMaxWidth().height(110.dp).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-            val bitmap = thumbnail
+            val bitmap = if (showThumbnails) thumbnail else null
             if (bitmap != null) Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             else Text(if (entry.type == "video") "▶" else "♫", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
         }
