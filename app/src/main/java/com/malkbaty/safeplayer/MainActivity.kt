@@ -1,16 +1,15 @@
 package com.malkbaty.safeplayer
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.content.res.Configuration
-import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,15 +45,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val prefs = remember { getSharedPreferences("appearance", MODE_PRIVATE) }
-            var palette by remember { mutableStateOf(Palette.entries.find { it.name == prefs.getString("palette", "FOREST") } ?: Palette.FOREST) }
-            var dark by remember { mutableStateOf(prefs.getBoolean("dark", false)) }
+            val settings = remember { SettingsRepository(applicationContext) }
+            val repository = remember { MediaRepository(applicationContext, database.mediaDao()) }
+            val appearance = remember { settings.appearance() }
+            var palette by remember { mutableStateOf(appearance.palette) }
+            var dark by remember { mutableStateOf(appearance.dark) }
             SafePlayerTheme(palette, dark) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    SafePlayerApp(database.mediaDao(), palette, dark) { selected, isDark ->
+                    SafePlayerApp(repository, palette, dark) { selected, isDark ->
                         palette = selected
                         dark = isDark
-                        prefs.edit().putString("palette", selected.name).putBoolean("dark", isDark).apply()
+                        settings.saveAppearance(Appearance(selected, isDark))
                     }
                 }
             }
@@ -66,11 +67,11 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SafePlayerApp(dao: MediaDao, palette: Palette, dark: Boolean, onTheme: (Palette, Boolean) -> Unit) {
+    private fun SafePlayerApp(repository: MediaRepository, palette: Palette, dark: Boolean, onTheme: (Palette, Boolean) -> Unit) {
         val scope = rememberCoroutineScope()
         var retry by remember { mutableIntStateOf(0) }
-        val libraryFlow = remember(dao, retry) {
-            dao.observeAll().map<List<MediaEntry>, LibraryState> { LibraryState.Ready(it) }
+        val libraryFlow = remember(repository, retry) {
+            repository.media.map<List<MediaEntry>, LibraryState> { LibraryState.Ready(it) }
                 .catch { emit(LibraryState.Error) }
         }
         val library by libraryFlow.collectAsStateWithLifecycle(initialValue = LibraryState.Loading)
@@ -79,11 +80,13 @@ class MainActivity : ComponentActivity() {
         var query by rememberSaveable { mutableStateOf("") }
         var type by rememberSaveable { mutableStateOf("all") }
         var favorites by rememberSaveable { mutableStateOf(false) }
+        var sort by rememberSaveable { mutableStateOf(MediaSort.NEWEST) }
+        var showSort by remember { mutableStateOf(false) }
         var playing by remember { mutableStateOf<MediaEntry?>(null) }
         var message by remember { mutableStateOf<String?>(null) }
         var pendingDelete by remember { mutableStateOf<MediaEntry?>(null) }
         var scanning by remember { mutableStateOf(false) }
-        val scanner = remember(dao) { MediaScanner(applicationContext, dao) }
+        val scanner = repository.scanner
         fun startScan() {
             val access = scanner.access()
             if (!access.video && !access.audio) {
@@ -107,20 +110,8 @@ class MainActivity : ComponentActivity() {
         val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { startScan() }
         val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             scope.launch {
-                var failed = 0
-                uris.forEach { uri ->
-                    try {
-                        val mime = contentResolver.getType(uri).orEmpty()
-                        val kind = when { mime.startsWith("video/") -> "video"; mime.startsWith("audio/") -> "audio"; else -> null }
-                        if (kind == null) { failed++; return@forEach }
-                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        val title = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                            if (cursor.moveToFirst()) cursor.getString(0) else null
-                        } ?: uri.lastPathSegment ?: "ملف وسائط"
-                        dao.insert(MediaEntry(uri.toString(), title, kind, System.currentTimeMillis()))
-                    } catch (_: Exception) { failed++ }
-                }
-                message = if (failed > 0) "تعذرت إضافة $failed من الملفات. تحقق من الوصول إليها وحاول مجدداً." else if (uris.isNotEmpty()) "تمت إضافة الملفات إلى المكتبة." else null
+                val result = repository.importDocuments(uris)
+                message = if (result.failed > 0) "تعذرت إضافة ${result.failed} من الملفات. تحقق من الوصول إليها وحاول مجدداً." else if (result.added > 0) "تمت إضافة الملفات إلى المكتبة." else null
             }
         }
         val current = playing
@@ -128,7 +119,7 @@ class MainActivity : ComponentActivity() {
             BackHandler { playing = null }
             PlayerScreen(this, current, inPip, onBack = { playing = null }, onPosition = { position ->
                 // Activity lifecycle scope survives disposal of the player composable.
-                lifecycleScope.launch { try { dao.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
+                lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
             })
         } else {
             Column(Modifier.fillMaxSize().padding(20.dp)) {
@@ -136,7 +127,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(8.dp))
                 Text("مكتبتك الخاصة، على جهازك", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(20.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
                     OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
                     TextButton(onClick = { showSettings = true }) { Text("المظهر") }
@@ -153,7 +144,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 message?.let { Text(it, color = MaterialTheme.colorScheme.primary); TextButton(onClick = { message = null }) { Text("إغلاق الرسالة") } }
-                val filtered = filterMedia(entries, query, type, favorites)
+                Box {
+                    TextButton(onClick = { showSort = true }) { Text("الترتيب: ${sort.label}") }
+                    DropdownMenu(expanded = showSort, onDismissRequest = { showSort = false }) {
+                        MediaSort.entries.forEach { option ->
+                            DropdownMenuItem(text = { Text(option.label) }, onClick = { sort = option; showSort = false })
+                        }
+                    }
+                }
+                val filtered = searchLibrary(entries, LibraryQuery(query, type, favorites, sort))
                 if (library is LibraryState.Loading) {
                     Spacer(Modifier.height(32.dp)); CircularProgressIndicator(); Text("جارٍ تحميل المكتبة…")
                 } else if (library is LibraryState.Error) {
@@ -170,7 +169,7 @@ class MainActivity : ComponentActivity() {
                                 Text(if (entry.type == "video") "فيديو" else "صوت", style = MaterialTheme.typography.bodySmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(onClick = { playing = entry }) { Text("تشغيل") }
-                                    TextButton(onClick = { scope.launch { try { dao.setFavorite(entry.uri, !entry.favorite) } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } }) { Text(if (entry.favorite) "إزالة المفضلة" else "إضافة للمفضلة") }
+                                    TextButton(onClick = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite) } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } }) { Text(if (entry.favorite) "إزالة المفضلة" else "إضافة للمفضلة") }
                                     TextButton(onClick = { pendingDelete = entry }) { Text("حذف") }
                                 }
                             }
@@ -197,7 +196,7 @@ class MainActivity : ComponentActivity() {
             }, confirmButton = { TextButton(onClick = { showSettings = false }) { Text("تم") } })
         }
         pendingDelete?.let { entry ->
-            AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك، وقد يظهر مجدداً عند فحص الوسائط.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { dao.delete(entry.uri); try { contentResolver.releasePersistableUriPermission(Uri.parse(entry.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {} } catch (_: Exception) { message = "تعذرت إزالة الملف. حاول مجدداً." } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
+            AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك، وقد يظهر مجدداً عند فحص الوسائط.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { repository.remove(entry.uri) } catch (_: Exception) { message = "تعذرت إزالة الملف. حاول مجدداً." } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
         }
     }
 
