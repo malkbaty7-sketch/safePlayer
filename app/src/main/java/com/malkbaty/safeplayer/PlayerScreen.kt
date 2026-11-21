@@ -48,6 +48,8 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var subtitle by remember(entry.uri) { mutableStateOf<Pair<Uri, String>?>(null) }
     var showSpeed by remember { mutableStateOf(false) }
     var showTracks by remember { mutableStateOf(false) }
+    var showEqualizer by remember { mutableStateOf(false) }
+    var audioSessionId by remember(entry.uri) { mutableIntStateOf(C.AUDIO_SESSION_ID_UNSET) }
     var locked by remember(entry.uri) { mutableStateOf(false) }
     var covered by remember(entry.uri) { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -127,6 +129,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                 buffering = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_ENDED) latestOnPosition(0)
             }
+            override fun onAudioSessionIdChanged(value: Int) { audioSessionId = value }
             override fun onTracksChanged(value: Tracks) { tracks = value }
             override fun onPlaybackParametersChanged(parameters: androidx.media3.common.PlaybackParameters) { speed = parameters.speed }
             override fun onPlayerError(playbackError: PlaybackException) { error = "تعذر تشغيل الملف أو الترجمة. تحقق من الوصول والصيغة ثم حاول مجدداً." }
@@ -135,6 +138,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             if (event == Lifecycle.Event.ON_STOP && !activity.isInPictureInPictureMode) player.pause()
         }
         player.addListener(listener)
+        audioSessionId = player.audioSessionId
         tracks = player.currentTracks
         isPlaying = player.isPlaying
         buffering = player.playbackState == Player.STATE_BUFFERING
@@ -187,6 +191,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                 TextButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) { Text(if (isPlaying) "إيقاف مؤقت" else "تشغيل") }
                 TextButton(onClick = { player.seekBack() }) { Text("رجوع ١٠ ث") }
                 TextButton(onClick = { player.seekForward() }) { Text("تقديم ١٠ ث") }
+                TextButton(onClick = { showEqualizer = true }) { Text("معادل الصوت") }
                 Box {
                     TextButton(onClick = { showSpeed = true }) { Text("السرعة ${speed}×") }
                     DropdownMenu(expanded = showSpeed, onDismissRequest = { showSpeed = false }) {
@@ -221,6 +226,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             }
         }
     }
+    AudioEqualizer(audioSessionId, showEqualizer && !locked && !inPip) { showEqualizer = false }
     if (showTracks && !locked && !inPip) {
         val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
         AlertDialog(onDismissRequest = { showTracks = false }, title = { Text("مسارات الترجمة") }, text = {
