@@ -2,6 +2,7 @@ package com.malkbaty.safeplayer
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Context
 import android.os.Build
 import android.provider.MediaStore
@@ -34,14 +35,15 @@ class IncrementalScanTest {
             put(MediaStore.MediaColumns.MIME_TYPE, "audio/mpeg")
             put(MediaStore.MediaColumns.RELATIVE_PATH, "Music/SafePlayerTests")
         }
-        val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: error("failed to create media")
+        val uri = resolver.insert(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values) ?: error("failed to create media")
+        val canonicalUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, ContentUris.parseId(uri)).toString()
         try {
             val scanner = MediaScanner(context, db.mediaDao())
             val access = scanner.access()
             assertTrue(access.video && access.audio && !access.limitedVideo)
             val first = scanner.scan(access, incremental = true)
             assertTrue(!first.incremental)
-            val row = db.mediaDao().observeAll().first().first { it.uri == uri.toString() }
+            val row = db.mediaDao().observeAll().first().first { it.uri == canonicalUri }
             db.mediaDao().setFavorite(row.uri, true)
             db.mediaDao().savePosition(row.uri, 1234)
             val renamed = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, "safeplayer-renamed-${System.nanoTime()}.mp3") }
@@ -49,7 +51,7 @@ class IncrementalScanTest {
             val second = scanner.scan(access, incremental = true)
             assertTrue(second.incremental)
             assertTrue(second.found >= 1)
-            val after = db.mediaDao().observeAll().first().first { it.uri == uri.toString() }
+            val after = db.mediaDao().observeAll().first().first { it.uri == canonicalUri }
             assertTrue(after.favorite)
             assertEquals(1234L, after.positionMs)
         } finally {
