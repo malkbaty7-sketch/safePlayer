@@ -25,6 +25,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Metadata
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -50,6 +51,8 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var subtitle by remember(entry.uri) { mutableStateOf<Pair<Uri, String>?>(null) }
     var showSpeed by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
+    var showChapters by remember { mutableStateOf(false) }
+    var chapters by remember(entry.uri) { mutableStateOf<List<PlaybackChapter>>(emptyList()) }
     var showTracks by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
     var audioSessionId by remember(entry.uri) { mutableIntStateOf(C.AUDIO_SESSION_ID_UNSET) }
@@ -133,7 +136,17 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                 if (playbackState == Player.STATE_ENDED) latestOnPosition(0)
             }
             override fun onAudioSessionIdChanged(value: Int) { audioSessionId = value }
-            override fun onTracksChanged(value: Tracks) { tracks = value }
+            override fun onTracksChanged(value: Tracks) {
+                tracks = value
+                val found = value.groups.flatMap { group ->
+                    (0 until group.length).flatMap { i -> group.getTrackFormat(i).metadata?.let(::id3Chapters).orEmpty() }
+                }
+                if (found.isNotEmpty()) chapters = found.distinctBy { it.id to it.startMs }.sortedBy { it.startMs }.take(200)
+            }
+            override fun onMetadata(metadata: Metadata) {
+                val found = id3Chapters(metadata)
+                if (found.isNotEmpty()) chapters = (chapters + found).distinctBy { it.id to it.startMs }.sortedBy { it.startMs }.take(200)
+            }
             override fun onPlaybackParametersChanged(parameters: androidx.media3.common.PlaybackParameters) { speed = parameters.speed }
             override fun onPlayerError(playbackError: PlaybackException) {
                 fileError = playbackError.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
@@ -204,6 +217,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                     DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
                         if (entry.type == "video") DropdownMenuItem(text = { Text(if (covered) "إظهار الفيديو" else "إخفاء الفيديو") }, onClick = { covered = !covered; gestureMessage = null; showMore = false })
                         DropdownMenuItem(text = { Text("السرعة ${speed}×") }, onClick = { showMore = false; showSpeed = true })
+                        DropdownMenuItem(text = { Text("الفصول (ID3)") }, onClick = { showMore = false; showChapters = true })
                         DropdownMenuItem(text = { Text("معادل الصوت") }, onClick = { showMore = false; showEqualizer = true })
                         if (entry.type == "video") {
                             DropdownMenuItem(text = { Text("إضافة ترجمة") }, onClick = { showMore = false; picker.launch(arrayOf("*/*")) })
@@ -233,6 +247,19 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                 }
             }
         }
+    }
+    if (showChapters && !locked && !inPip) {
+        AlertDialog(onDismissRequest = { showChapters = false }, title = { Text("الفصول") }, text = {
+            if (chapters.isEmpty()) Text("لم تتوفر فصول ID3 لهذا الملف. لا يدعم التطبيق حالياً فصول MKV أو M4V.")
+            else androidx.compose.foundation.lazy.LazyColumn {
+                items(chapters.size) { index ->
+                    val chapter = chapters[index]
+                    TextButton(enabled = player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM), onClick = {
+                        player.seekTo(chapter.startMs); showChapters = false
+                    }) { Text("${chapter.title} — ${formatPlaybackTime(chapter.startMs)}") }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = { showChapters = false }) { Text("إغلاق") } })
     }
     if (showSpeed && !locked && !inPip) {
         AlertDialog(onDismissRequest = { showSpeed = false }, title = { Text("سرعة التشغيل") }, text = {
