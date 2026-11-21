@@ -24,7 +24,7 @@ class ScanNotifications(private val context: Context) {
         val notification = NotificationCompat.Builder(context, "scan")
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentTitle("اكتمل فحص المكتبة")
-            .setContentText("تم العثور على ${result.found} ملف؛ أُضيف ${result.added}.")
+            .setContentText("فُحص ${result.found} ملف${if (result.incremental) " متغير" else ""}؛ أُضيف ${result.added}.")
             .setAutoCancel(true).build()
         try { NotificationManagerCompat.from(context).notify(1, notification) } catch (_: SecurityException) { }
     }

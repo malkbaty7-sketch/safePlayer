@@ -20,9 +20,9 @@ class MediaScannerWorker(context: Context, params: WorkerParameters) : Coroutine
             return Result.failure()
         }
         return try {
-            val result = scanner.scan(access)
+            val result = scanner.scan(access, incremental = true)
             val note = if (!access.video || !access.audio || access.limitedVideo) " (الصلاحيات جزئية)" else ""
-            status.edit().putString("last", "آخر فحص تلقائي: ${result.found} ملف، أُضيف ${result.added}.$note").apply()
+            status.edit().putString("last", "آخر فحص تلقائي${if (result.incremental) " تزايدي" else " كامل"}: فُحص ${result.found} ملف، أُضيف ${result.added}.$note").apply()
             ScanNotifications(applicationContext).show(result)
             Result.success()
         } catch (e: CancellationException) {
