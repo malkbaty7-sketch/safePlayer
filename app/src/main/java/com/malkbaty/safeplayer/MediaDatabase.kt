@@ -47,6 +47,3 @@ abstract class MediaDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
 }
 
-fun filterMedia(items: List<MediaEntry>, query: String, type: String, favoritesOnly: Boolean): List<MediaEntry> =
-    items.filter { it.title.contains(query.trim(), ignoreCase = true) &&
-        (type == "all" || it.type == type) && (!favoritesOnly || it.favorite) }
