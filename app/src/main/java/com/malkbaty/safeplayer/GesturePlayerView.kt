@@ -26,12 +26,14 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
     private var startVolume = 0
     private var startBrightness = 0.5f
     private var allowGesture = false
+    private var doubleTapEligible = false
+    private var lastHiddenDown = Long.MIN_VALUE
     private var dragging = false
     private var horizontal = false
     private val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            if (!gesturesEnabled || !allowGesture) return false
+            if (!gesturesEnabled || !doubleTapEligible) return false
             player?.let { if (it.isPlaying) it.pause() else it.play() }
             onGestureMessage(if (player?.isPlaying == true) "تشغيل" else "إيقاف مؤقت")
             return true
@@ -43,6 +45,8 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 allowGesture = !isControllerFullyVisible
+                doubleTapEligible = allowGesture || (lastHiddenDown != Long.MIN_VALUE && event.eventTime - lastHiddenDown <= ViewConfiguration.getDoubleTapTimeout())
+                if (allowGesture) lastHiddenDown = event.eventTime
                 dragging = false
                 downX = event.x; downY = event.y
                 startPosition = player?.currentPosition ?: 0
@@ -91,7 +95,7 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
                 return true
             }
         }
-        if (allowGesture) detector.onTouchEvent(event)
+        detector.onTouchEvent(event)
         return super.dispatchTouchEvent(event)
     }
 }
