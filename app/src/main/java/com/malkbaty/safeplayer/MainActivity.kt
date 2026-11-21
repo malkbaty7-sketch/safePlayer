@@ -14,15 +14,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,12 +58,14 @@ class MainActivity : ComponentActivity() {
             var palette by remember { mutableStateOf(appearance.palette) }
             var dark by remember { mutableStateOf(appearance.dark) }
             SafePlayerTheme(palette, dark) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     SafePlayerApp(repository, palette, dark) { selected, isDark ->
                         palette = selected
                         dark = isDark
                         settings.saveAppearance(Appearance(selected, isDark))
                     }
+                }
                 }
             }
         }
@@ -84,6 +86,7 @@ class MainActivity : ComponentActivity() {
         var favorites by rememberSaveable { mutableStateOf(false) }
         var sort by rememberSaveable { mutableStateOf(MediaSort.NEWEST) }
         var showSort by remember { mutableStateOf(false) }
+        var gridView by rememberSaveable { mutableStateOf(true) }
         var playing by remember { mutableStateOf<MediaEntry?>(null) }
         var message by remember { mutableStateOf<String?>(null) }
         var pendingDelete by remember { mutableStateOf<MediaEntry?>(null) }
@@ -157,60 +160,60 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
             })
         } else {
-            Column(Modifier.fillMaxSize().padding(20.dp)) {
-                Text("SafePlayer", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                Text("مكتبتك الخاصة، على جهازك", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(20.dp))
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
-                    OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
-                    TextButton(onClick = { showSettings = true }) { Text("الإعدادات") }
-                    TextButton(onClick = { showCloud = true }) { Text("السحابة") }
-                }
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    OutlinedButton(enabled = !scanning, onClick = { permissionLauncher.launch(scanner.permissions()) }) { Text("فحص وسائط الجهاز") }
-                    if (scanning) { Spacer(Modifier.width(12.dp)); CircularProgressIndicator(Modifier.size(24.dp)); Text(" جارٍ الفحص…") }
-                }
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("البحث في المكتبة") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("all" to "الكل", "video" to "فيديو", "audio" to "صوتيات").forEach { (value, label) ->
-                        FilterChip(selected = type == value, onClick = { type = value }, label = { Text(label) })
-                    }
-                }
-                message?.let { Text(it, color = MaterialTheme.colorScheme.primary); TextButton(onClick = { message = null }) { Text("إغلاق الرسالة") } }
-                Box {
-                    TextButton(onClick = { showSort = true }) { Text("الترتيب: ${sort.label}") }
-                    DropdownMenu(expanded = showSort, onDismissRequest = { showSort = false }) {
-                        MediaSort.entries.forEach { option ->
-                            DropdownMenuItem(text = { Text(option.label) }, onClick = { sort = option; showSort = false })
+            val filtered = searchLibrary(entries, LibraryQuery(query, type, favorites, sort))
+            LazyVerticalGrid(
+                columns = if (gridView) GridCells.Adaptive(230.dp) else GridCells.Fixed(1),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column {
+                        Text("SafePlayer", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+                        Text("مكتبتك الخاصة، على جهازك", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(12.dp))
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
+                            OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
+                            TextButton(onClick = { showSettings = true }) { Text("الإعدادات") }
+                            TextButton(onClick = { showCloud = true }) { Text("السحابة") }
                         }
-                    }
-                }
-                val filtered = searchLibrary(entries, LibraryQuery(query, type, favorites, sort))
-                if (library is LibraryState.Loading) {
-                    Spacer(Modifier.height(32.dp)); CircularProgressIndicator(); Text("جارٍ تحميل المكتبة…")
-                } else if (library is LibraryState.Error) {
-                    Spacer(Modifier.height(32.dp)); Text("تعذر تحميل المكتبة. حاول مجدداً.", color = MaterialTheme.colorScheme.error)
-                    Button(onClick = { retry++ }) { Text("إعادة المحاولة") }
-                } else if (filtered.isEmpty()) {
-                    Spacer(Modifier.height(32.dp))
-                    Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة. غيّر البحث أو الفلتر.")
-                } else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
-                    items(filtered, key = { it.uri }) { entry ->
-                        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(14.dp)) {
-                                Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                                Text(if (entry.type == "video") "فيديو" else "صوت", style = MaterialTheme.typography.bodySmall)
-                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    TextButton(onClick = { playing = entry }) { Text("تشغيل") }
-                                    TextButton(onClick = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } }) { Text(if (entry.favorite) "إزالة المفضلة" else "إضافة للمفضلة") }
-                                    TextButton(onClick = { pendingDelete = entry }) { Text("حذف") }
-                                    if (entry.type == "video") TextButton(enabled = !uploading, onClick = { pendingUpload = entry }) { Text("حفظ سحابي") }
-                                }
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            OutlinedButton(enabled = !scanning, onClick = { permissionLauncher.launch(scanner.permissions()) }) { Text("فحص وسائط الجهاز") }
+                            if (scanning) { Spacer(Modifier.width(12.dp)); CircularProgressIndicator(Modifier.size(24.dp)); Text(" جارٍ الفحص…") }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("البحث في المكتبة") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("all" to "الكل", "video" to "فيديو", "audio" to "صوتيات").forEach { (value, label) ->
+                                FilterChip(selected = type == value, onClick = { type = value }, label = { Text(label) })
                             }
                         }
+                        message?.let { Text(it, color = MaterialTheme.colorScheme.primary); TextButton(onClick = { message = null }) { Text("إغلاق الرسالة") } }
+                        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Box {
+                                TextButton(onClick = { showSort = true }) { Text("الترتيب: ${sort.label}") }
+                                DropdownMenu(expanded = showSort, onDismissRequest = { showSort = false }) {
+                                    MediaSort.entries.forEach { option ->
+                                        DropdownMenuItem(text = { Text(option.label) }, onClick = { sort = option; showSort = false })
+                                    }
+                                }
+                            }
+                            FilterChip(selected = gridView, onClick = { gridView = true }, label = { Text("شبكة") })
+                            Spacer(Modifier.width(8.dp))
+                            FilterChip(selected = !gridView, onClick = { gridView = false }, label = { Text("قائمة") })
+                        }
+                    }
+                }
+                when {
+                    library is LibraryState.Loading -> item(span = { GridItemSpan(maxLineSpan) }) { Column { CircularProgressIndicator(); Text("جارٍ تحميل المكتبة…") } }
+                    library is LibraryState.Error -> item(span = { GridItemSpan(maxLineSpan) }) { Column { Text("تعذر تحميل المكتبة. حاول مجدداً.", color = MaterialTheme.colorScheme.error); Button(onClick = { retry++ }) { Text("إعادة المحاولة") } } }
+                    filtered.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة. غيّر البحث أو الفلتر.") }
+                    else -> items(filtered, key = { it.uri }) { entry ->
+                        MediaCard(entry = entry, uploading = uploading, onPlay = { playing = entry },
+                            onFavorite = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } },
+                            onDelete = { pendingDelete = entry }, onCloud = { pendingUpload = entry })
                     }
                 }
             }

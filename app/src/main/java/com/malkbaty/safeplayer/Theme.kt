@@ -13,7 +13,8 @@ import androidx.compose.ui.unit.dp
 enum class Palette(val label: String, val light: Color, val dark: Color) {
     FOREST("الغابة", Color(0xFF245E45), Color(0xFFA7D4B3)),
     OCEAN("المحيط", Color(0xFF006779), Color(0xFF80D4E9)),
-    SUNSET("الغروب", Color(0xFF99452C), Color(0xFFFFB5A0))
+    SUNSET("الغروب", Color(0xFF99452C), Color(0xFFFFB5A0)),
+    ROYAL("البنفسجي", Color(0xFF704184), Color(0xFFE4B7F2))
 }
 
 @Composable
