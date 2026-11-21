@@ -119,6 +119,8 @@ class MainActivity : ComponentActivity() {
         var message by remember { mutableStateOf<String?>(null) }
         var pendingDelete by remember { mutableStateOf<MediaEntry?>(null) }
         var scanning by remember { mutableStateOf(false) }
+        var checkingMissing by remember { mutableStateOf(false) }
+        var missingEntries by remember { mutableStateOf<List<MediaEntry>?>(null) }
         val notifications = remember { ScanNotifications(applicationContext) }
         var notificationsEnabled by remember { mutableStateOf(notifications.enabled && notifications.allowed()) }
         val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -171,6 +173,17 @@ class MainActivity : ComponentActivity() {
                 } catch (_: Exception) {
                     message = "تعذر إكمال فحص الوسائط؛ قد تكون بعض الملفات أُضيفت. تحقق من الصلاحيات وحاول مجدداً."
                 } finally { scanning = false }
+            }
+        }
+        fun checkMissing() {
+            if (library !is LibraryState.Ready) { message = "انتظر تحميل المكتبة ثم حاول مجدداً."; return }
+            scope.launch {
+                checkingMissing = true
+                try { missingEntries = scanner.findUnavailable(entries) }
+                catch (e: CancellationException) { throw e }
+                catch (_: MediaScanner.FullAccessRequired) { message = "تتطلب المراجعة إذن الوصول الكامل للفيديو والصوت. افتح إعدادات الجهاز واسمح بهما ثم حاول مجدداً." }
+                catch (_: Exception) { message = "تعذرت مراجعة MediaStore؛ لم تُزل أي عناصر. تحقق من الوصول وحاول مجدداً." }
+                finally { checkingMissing = false }
             }
         }
         val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { startScan() }
@@ -303,6 +316,9 @@ class MainActivity : ComponentActivity() {
         if (showSettings) {
             AlertDialog(onDismissRequest = { showSettings = false }, title = { Text("الإعدادات") }, text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("إدارة المكتبة", style = MaterialTheme.typography.titleMedium)
+                    Text("راجع عناصر MediaStore غير الظاهرة حالياً. لا تُزال الملفات تلقائياً.", style = MaterialTheme.typography.bodySmall)
+                    TextButton(enabled = !checkingMissing, onClick = { showSettings = false; checkMissing() }) { Text("مراجعة العناصر غير المتاحة") }
                     Text("الألوان")
                     Palette.entries.forEach { item ->
                         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -339,6 +355,45 @@ class MainActivity : ComponentActivity() {
                     else periodic.lastStatus()?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }, confirmButton = { TextButton(onClick = { showSettings = false }) { Text("تم") } })
+        }
+        missingEntries?.let { missing ->
+            AlertDialog(onDismissRequest = { if (!checkingMissing) missingEntries = null },
+                title = { Text("عناصر MediaStore غير الظاهرة") },
+                text = {
+                    Column {
+                        Text("قد تكون الملفات محذوفة أو على وحدة تخزين غير متصلة؛ لا يمكن الجزم بسبب غيابها. إزالة سجل تحذف مفضلته وسجله وموضعه من المكتبة فقط، ولا تحذف الملف الأصلي. تقتصر المراجعة على عناوين MediaStore القياسية، ولا تشمل عناوين مستندات SAF.")
+                        if (checkingMissing) { CircularProgressIndicator(); Text("جارٍ التحقق…") }
+                        else if (missing.isEmpty()) Text("لا توجد عناصر غير ظاهرة في النطاق المفحوص.")
+                        else androidx.compose.foundation.lazy.LazyColumn {
+                            items(missing.size, key = { missing[it].uri }) { index ->
+                                val entry = missing[index]
+                                Column {
+                                    Text(entry.title, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content))
+                                    TextButton(onClick = {
+                                        scope.launch {
+                                            checkingMissing = true
+                                            try {
+                                                val stillMissing = scanner.findUnavailable(listOf(entry)).any { it.uri == entry.uri }
+                                                if (stillMissing) {
+                                                    repository.remove(entry.uri)
+                                                    missingEntries = missingEntries?.filterNot { it.uri == entry.uri }
+                                                    message = "أُزيل السجل من المكتبة دون حذف الملف الأصلي."
+                                                } else {
+                                                    missingEntries = missingEntries?.filterNot { it.uri == entry.uri }
+                                                    message = "أصبح العنصر ظاهراً مجدداً؛ لم تتم إزالته."
+                                                }
+                                            } catch (e: CancellationException) { throw e }
+                                            catch (_: MediaScanner.FullAccessRequired) { message = "تغيّرت أذونات الوسائط؛ لم يُزل السجل."; missingEntries = null }
+                                            catch (_: Exception) { message = "تعذر التحقق أو إزالة السجل. حاول مجدداً."; missingEntries = null }
+                                            finally { checkingMissing = false }
+                                        }
+                                    }) { Text("إزالة هذا السجل من المكتبة") }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(enabled = !checkingMissing, onClick = { missingEntries = null }) { Text("إغلاق") } })
         }
         if (showCloud) CloudDialog(cloud, onClose = { showCloud = false })
         pendingUpload?.let { entry ->
