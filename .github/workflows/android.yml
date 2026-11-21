@@ -65,7 +65,7 @@ jobs:
       - name: Annotate device test failures
         if: failure()
         run: |
-          find app/build/outputs/androidTest-results -name '*.xml' -type f -exec grep -H -E '<failure|<error' {} + | head -20 | while IFS= read -r line; do echo "::error::$line"; done || true
+          find app/build/outputs/androidTest-results -name '*.xml' -type f -exec grep -H -A 15 -E '<failure|<error' {} + | head -40 | while IFS= read -r line; do echo "::error::$line"; done || true
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
