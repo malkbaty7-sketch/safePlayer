@@ -1,5 +1,7 @@
 package com.malkbaty.safeplayer
 
+import android.content.Context
+import androidx.room.Room
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -45,5 +47,13 @@ interface MediaDao {
 @Database(entities = [MediaEntry::class], version = 1, exportSchema = false)
 abstract class MediaDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
+
+    companion object {
+        @Volatile private var instance: MediaDatabase? = null
+        fun get(context: Context): MediaDatabase = instance ?: synchronized(this) {
+            instance ?: Room.databaseBuilder(context.applicationContext, MediaDatabase::class.java, "safeplayer.db")
+                .build().also { instance = it }
+        }
+    }
 }
 

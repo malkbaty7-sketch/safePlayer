@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,7 +27,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.room.Room
+import androidx.work.WorkInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -45,7 +48,7 @@ class MainActivity : ComponentActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPip = isInPictureInPictureMode
     }
-    private val database by lazy { Room.databaseBuilder(applicationContext, MediaDatabase::class.java, "safeplayer.db").build() }
+    private val database by lazy { MediaDatabase.get(applicationContext) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -65,11 +68,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    override fun onDestroy() {
-        super.onDestroy()
-        if (isFinishing) database.close()
-    }
-
     @Composable
     private fun SafePlayerApp(repository: MediaRepository, palette: Palette, dark: Boolean, onTheme: (Palette, Boolean) -> Unit) {
         val scope = rememberCoroutineScope()
@@ -102,6 +100,27 @@ class MainActivity : ComponentActivity() {
         var pendingUpload by remember { mutableStateOf<MediaEntry?>(null) }
         var uploading by remember { mutableStateOf(false) }
         val scanner = repository.scanner
+        val periodic = remember { PeriodicScanner(applicationContext) }
+        val jobs by periodic.work.collectAsStateWithLifecycle(initialValue = emptyList())
+        val periodicEnabled = jobs.any { !it.state.isFinished }
+        var scheduleChanging by remember { mutableStateOf(false) }
+        fun changeSchedule(enable: Boolean) {
+            scope.launch {
+                scheduleChanging = true
+                try {
+                    val operation = if (enable) periodic.enable() else periodic.disable()
+                    withContext(Dispatchers.IO) { operation.result.get() }
+                    message = if (enable) "تمت جدولة الفحص التلقائي؛ يحدد النظام وقت التنفيذ." else "تم إيقاف الفحص التلقائي."
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) { message = "تعذر تحديث جدول الفحص. حاول مجدداً." }
+                finally { scheduleChanging = false }
+            }
+        }
+        val periodicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            val access = scanner.access()
+            if (access.video || access.audio) changeSchedule(true)
+            else message = "لم يُمنح إذن الوسائط؛ لم تُفعّل الفهرسة التلقائية."
+        }
         fun startScan() {
             val access = scanner.access()
             if (!access.video && !access.audio) {
@@ -197,8 +216,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (showSettings) {
-            AlertDialog(onDismissRequest = { showSettings = false }, title = { Text("المظهر") }, text = {
-                Column {
+            AlertDialog(onDismissRequest = { showSettings = false }, title = { Text("الإعدادات") }, text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("الألوان")
                     Palette.entries.forEach { item ->
                         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -219,6 +238,15 @@ class MainActivity : ComponentActivity() {
                         })
                         Text("إشعار عند اكتمال الفحص")
                     }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = periodicEnabled, enabled = !scheduleChanging, onCheckedChange = { enable ->
+                            if (enable) periodicPermission.launch(scanner.permissions()) else changeSchedule(false)
+                        })
+                        Text("فحص تلقائي كل ٢٤ ساعة تقريباً")
+                    }
+                    Text("يعتمد التوقيت على النظام، والفحص يشمل الوسائط المسموح بها فقط.", style = MaterialTheme.typography.bodySmall)
+                    if (jobs.any { it.state == WorkInfo.State.RUNNING }) Text("جارٍ الفحص التلقائي…", style = MaterialTheme.typography.bodySmall)
+                    else periodic.lastStatus()?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }, confirmButton = { TextButton(onClick = { showSettings = false }) { Text("تم") } })
         }
