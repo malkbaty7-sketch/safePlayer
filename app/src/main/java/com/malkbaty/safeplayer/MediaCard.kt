@@ -1,9 +1,7 @@
 package com.malkbaty.safeplayer
 
 import android.graphics.Bitmap
-import android.net.Uri
 import android.os.Build
-import android.util.Size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -22,20 +20,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /** Thumbnails are best effort and local-only; SAF providers and older devices may not supply them. */
 @Composable
 fun MediaCard(entry: MediaEntry, uploading: Boolean, showThumbnails: Boolean = true, onPlay: () -> Unit, onFavorite: () -> Unit, onDelete: () -> Unit, onCloud: () -> Unit) {
     val context = LocalContext.current
-    val thumbnail by produceState<Bitmap?>(null, entry.uri, entry.type, showThumbnails) {
+    val thumbnail by produceState<Bitmap?>(null, entry.uri, entry.type, entry.sizeBytes, entry.durationMs, showThumbnails) {
         value = null
         if (showThumbnails && entry.type == "video" && Build.VERSION.SDK_INT >= 29) {
-            value = withContext(Dispatchers.IO) {
-                try { context.contentResolver.loadThumbnail(Uri.parse(entry.uri), Size(320, 180), null) }
-                catch (_: Exception) { null }
-            }
+            value = ThumbnailLoader.get(context).load(entry)
         }
     }
     ElevatedCard(

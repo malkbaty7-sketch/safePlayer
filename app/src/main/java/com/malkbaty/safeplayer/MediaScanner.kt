@@ -72,6 +72,7 @@ class MediaScanner(private val context: Context, private val dao: MediaDao) {
         }
         if (access.video) scanType("video")
         if (access.audio) scanType("audio")
+        ThumbnailLoader.clearIfCreated()
         Result(found, added)
     }
 }
