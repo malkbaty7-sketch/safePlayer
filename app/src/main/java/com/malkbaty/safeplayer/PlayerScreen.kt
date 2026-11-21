@@ -7,6 +7,7 @@ import android.util.Rational
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
@@ -45,6 +46,8 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     var showSpeed by remember { mutableStateOf(false) }
     var showTracks by remember { mutableStateOf(false) }
     var locked by remember(entry.uri) { mutableStateOf(false) }
+    var covered by remember(entry.uri) { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(false) }
     var gestureMessage by remember { mutableStateOf<String?>(null) }
     var speed by remember { mutableFloatStateOf(1f) }
     var tracks by remember { mutableStateOf(Tracks.EMPTY) }
@@ -94,6 +97,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
     DisposableEffect(player, owner) {
         val initialBrightness = activity.window.attributes.screenBrightness
         val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
             override fun onTracksChanged(value: Tracks) { tracks = value }
             override fun onPlaybackParametersChanged(parameters: androidx.media3.common.PlaybackParameters) { speed = parameters.speed }
             override fun onPlayerError(playbackError: PlaybackException) { error = "تعذر تشغيل الملف أو الترجمة. تحقق من الوصول والصيغة ثم حاول مجدداً." }
@@ -103,6 +107,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
         }
         player.addListener(listener)
         tracks = player.currentTracks
+        isPlaying = player.isPlaying
         owner.lifecycle.addObserver(observer)
         onDispose {
             val position = if (player.playbackState == Player.STATE_ENDED) 0L else player.currentPosition.coerceAtLeast(0)
@@ -120,18 +125,30 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
             Text(entry.title, style = MaterialTheme.typography.titleLarge, maxLines = 2)
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            AndroidView(factory = { context -> GesturePlayerView(context).apply { this.player = player; keepScreenOn = true } }, update = {
-                it.player = player
-                it.useController = !inPip && !locked
-                it.gesturesEnabled = !inPip && !locked
-                it.onGestureMessage = { message -> gestureMessage = message }
-            }, modifier = Modifier.fillMaxSize())
+            if (covered) {
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black), contentAlignment = Alignment.Center) {
+                    Text("الفيديو مخفي يدوياً", color = androidx.compose.ui.graphics.Color.White)
+                }
+            } else {
+                AndroidView(factory = { context -> GesturePlayerView(context).apply { this.player = player; keepScreenOn = true } }, update = {
+                    it.player = player
+                    it.useController = !inPip && !locked
+                    it.gesturesEnabled = !inPip && !locked
+                    it.onGestureMessage = { message -> gestureMessage = message }
+                }, modifier = Modifier.fillMaxSize())
+            }
             gestureMessage?.let { Text(it, modifier = Modifier.align(Alignment.Center), color = androidx.compose.ui.graphics.Color.White) }
         }
         if (!inPip) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { locked = !locked; gestureMessage = null }) { Text(if (locked) "فتح القفل" else "قفل التحكم") }
                 if (!locked) {
+                if (entry.type == "video") TextButton(onClick = { covered = !covered; gestureMessage = null }) { Text(if (covered) "إظهار الفيديو" else "إخفاء الفيديو") }
+                if (covered) {
+                    TextButton(onClick = { if (player.isPlaying) player.pause() else player.play() }) { Text(if (isPlaying) "إيقاف مؤقت" else "تشغيل") }
+                    TextButton(onClick = { player.seekBack() }) { Text("رجوع ١٠ ث") }
+                    TextButton(onClick = { player.seekForward() }) { Text("تقديم ١٠ ث") }
+                }
                 Box {
                     TextButton(onClick = { showSpeed = true }) { Text("السرعة ${speed}×") }
                     DropdownMenu(expanded = showSpeed, onDismissRequest = { showSpeed = false }) {
@@ -144,7 +161,7 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                     TextButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("إضافة ترجمة") }
                     TextButton(onClick = { showTracks = true }) { Text("مسارات الترجمة") }
                 }
-                if (entry.type == "video" && activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                if (entry.type == "video" && !covered && activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
                     TextButton(onClick = {
                         try {
                             val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
@@ -155,7 +172,8 @@ fun PlayerScreen(activity: MainActivity, entry: MediaEntry, inPip: Boolean, onBa
                 }
             }
             if (!locked && subtitle != null) TextButton(onClick = { applySubtitle(null) }) { Text("إزالة الترجمة") }
-            if (!locked && entry.type == "video") Text("عند إخفاء أدوات التحكم: اسحب أفقياً للتقديم، وعمودياً يميناً للصوت ويساراً للإضاءة.", style = MaterialTheme.typography.bodySmall)
+            if (covered) Text("إخفاء مؤقت للصورة فقط؛ الصوت مستمر، ولا يحلل المحتوى أو يوفر رقابة أبوية.", style = MaterialTheme.typography.bodySmall)
+            if (!covered && !locked && entry.type == "video") Text("عند إخفاء أدوات التحكم: اسحب أفقياً للتقديم، وعمودياً يميناً للصوت ويساراً للإضاءة.", style = MaterialTheme.typography.bodySmall)
             error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
                 Row {
