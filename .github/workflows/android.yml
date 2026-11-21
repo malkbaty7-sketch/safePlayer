@@ -15,7 +15,16 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest
+      - name: Build and test
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest 2>&1 | tee gradle-build.log
+      - name: Annotate build failures
+        if: failure()
+        run: |
+          if [ -f gradle-build.log ]; then
+            grep -E '^e: |^e:|error:| FAILED|What went wrong|Exception:|failed:' gradle-build.log | head -30 | while IFS= read -r line; do echo "::error::$line"; done || true
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: SafePlayer-debug

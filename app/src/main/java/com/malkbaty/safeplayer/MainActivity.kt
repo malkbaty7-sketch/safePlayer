@@ -159,7 +159,9 @@ class MainActivity : ComponentActivity() {
         val current = playing
         if (current != null) {
             BackHandler { playing = null }
-            PlayerScreen(this, current, inPip, onBack = { playing = null }, onPosition = { position ->
+            PlayerScreen(this, current, inPip, onBack = { playing = null }, onStarted = {
+                lifecycleScope.launch { try { repository.markPlayed(current.uri, System.currentTimeMillis()) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ سجل التشغيل." } }
+            }, onPosition = { position ->
                 // Activity lifecycle scope survives disposal of the player composable.
                 lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
             })
@@ -207,6 +209,19 @@ class MainActivity : ComponentActivity() {
                             FilterChip(selected = gridView, onClick = { gridView = true }, label = { Text("شبكة") })
                             Spacer(Modifier.width(8.dp))
                             FilterChip(selected = !gridView, onClick = { gridView = false }, label = { Text("قائمة") })
+                        }
+                    }
+                }
+                if (library is LibraryState.Ready) {
+                    lastWatched(entries)?.let { recent ->
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            ElevatedCard(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text("استكمال المشاهدة", style = MaterialTheme.typography.titleMedium)
+                                    Text(recent.title, maxLines = 1)
+                                    TextButton(onClick = { playing = recent }) { Text("استكمال من ${formatPlaybackTime(recent.positionMs)}") }
+                                }
+                            }
                         }
                     }
                 }
