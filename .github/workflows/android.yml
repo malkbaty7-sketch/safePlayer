@@ -25,10 +25,26 @@ jobs:
           if [ -f gradle-build.log ]; then
             grep -E '^e: |^e:|error:| FAILED|What went wrong|Exception:|failed:' gradle-build.log | head -30 | while IFS= read -r line; do echo "::error::$line"; done || true
           fi
-      - uses: actions/upload-artifact@v4
+      - name: Prepare installable test APK
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/safeplayer-apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/safeplayer-apk/SafePlayer-debug.apk"
+          cd "$RUNNER_TEMP/safeplayer-apk"
+          sha256sum SafePlayer-debug.apk > SHA256SUMS.txt
+      - name: Upload installable APK
+        id: apk
+        uses: actions/upload-artifact@v4
         with:
-          name: SafePlayer-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: SafePlayer-installable-debug-APK
+          path: ${{ runner.temp }}/safeplayer-apk/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Add APK download to job summary
+        run: |
+          echo '### SafePlayer test APK' >> "$GITHUB_STEP_SUMMARY"
+          echo '[Download APK artifact (ZIP)](${{ steps.apk.outputs.artifact-url }})' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Extract SafePlayer-debug.apk from the ZIP. Debug builds are for testing, not store release.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: SafePlayer-release-unsigned
