@@ -7,6 +7,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.Source
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeout
 
 data class CloudVideo(val id: String, val title: String, val favorite: Boolean)
 
@@ -30,15 +31,18 @@ class CloudRepository(private val context: Context) {
         return db.collection("users").document(user.uid).collection("videos")
     }
 
-    suspend fun save(entry: MediaEntry) {
+    suspend fun save(entry: MediaEntry) = withTimeout(20_000) {
         require(entry.type == "video")
         // Explicit metadata only. Never upload URI, file bytes or playback position.
         collection().add(mapOf("title" to entry.title, "favorite" to entry.favorite)).await()
+        Unit
     }
 
-    suspend fun list(): List<CloudVideo> = collection().get(Source.SERVER).await().documents.map {
-        CloudVideo(it.id, it.getString("title") ?: "بدون عنوان", it.getBoolean("favorite") ?: false)
+    suspend fun list(): List<CloudVideo> = withTimeout(20_000) {
+        collection().get(Source.SERVER).await().documents.map {
+            CloudVideo(it.id, it.getString("title") ?: "بدون عنوان", it.getBoolean("favorite") ?: false)
+        }
     }
 
-    suspend fun remove(id: String) { collection().document(id).delete().await() }
+    suspend fun remove(id: String) = withTimeout(20_000) { collection().document(id).delete().await(); Unit }
 }

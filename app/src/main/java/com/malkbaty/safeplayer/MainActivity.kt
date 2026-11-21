@@ -29,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
@@ -230,6 +231,7 @@ class MainActivity : ComponentActivity() {
                     scope.launch {
                         uploading = true; message = "جارٍ حفظ بيانات الفيديو سحابياً…"
                         try { cloud.save(entry); message = "تم حفظ بيانات الفيديو سحابياً." }
+                        catch (_: TimeoutCancellationException) { message = "انتهت مهلة الحفظ وقد يكتمل لاحقاً. تحقق من السحابة قبل إعادة المحاولة." }
                         catch (e: CancellationException) { throw e }
                         catch (_: Exception) { message = "تعذر الحفظ السحابي. تحقق من إعداد Firebase والاتصال وقواعد الأمان وحاول مجدداً." }
                         finally { uploading = false }

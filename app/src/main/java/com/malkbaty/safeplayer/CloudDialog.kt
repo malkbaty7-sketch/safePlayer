@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 
 @Composable
@@ -21,6 +22,7 @@ fun CloudDialog(repository: CloudRepository, onClose: () -> Unit) {
         scope.launch {
             loading = true; error = null
             try { videos = repository.list() }
+            catch (_: TimeoutCancellationException) { error = "انتهت مهلة الاتصال. تحقق من الإنترنت وأعد المحاولة." }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { error = "تعذر تحميل السحابة. تحقق من إعداد Firebase والإنترنت وقواعد الأمان، ثم أعد المحاولة." }
             finally { loading = false }
@@ -50,6 +52,7 @@ fun CloudDialog(repository: CloudRepository, onClose: () -> Unit) {
                 scope.launch {
                     loading = true; error = null
                     try { repository.remove(video.id); videos = videos.filterNot { it.id == video.id } }
+                    catch (_: TimeoutCancellationException) { error = "انتهت مهلة الحذف وقد يكتمل لاحقاً. حدّث القائمة للتحقق." }
                     catch (e: CancellationException) { throw e }
                     catch (_: Exception) { error = "تعذر الحذف. تحقق من الاتصال وحاول مجدداً." }
                     finally { loading = false }
