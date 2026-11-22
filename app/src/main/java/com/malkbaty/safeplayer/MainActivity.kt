@@ -214,7 +214,7 @@ class MainActivity : ComponentActivity() {
         if (current != null) {
             val stream = isNetworkStream
             BackHandler { playing = null }
-            PlayerScreen(this, current, inPip, onBack = { playing = null }, onChooseAnother = { playing = null; picker.launch(arrayOf("video/*", "audio/*")) }, onStarted = {
+            PlayerScreen(this@MainActivity, current, inPip, onBack = { playing = null }, onChooseAnother = { playing = null; picker.launch(arrayOf("video/*", "audio/*")) }, onStarted = {
                 if (!stream) lifecycleScope.launch { try { repository.markPlayed(current.uri, System.currentTimeMillis()) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = AppMessage("تعذر حفظ سجل التشغيل.", MessageTone.ERROR) } }
             }, onPosition = { position ->
                 // Activity lifecycle scope survives disposal of the player composable.
