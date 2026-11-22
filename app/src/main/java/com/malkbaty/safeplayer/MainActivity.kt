@@ -1,6 +1,7 @@
 package com.malkbaty.safeplayer
 
 import android.Manifest
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -116,9 +117,10 @@ class MainActivity : ComponentActivity() {
         var playing by remember { mutableStateOf<MediaEntry?>(null) }
         var isNetworkStream by remember { mutableStateOf(false) }
         var showStreamDialog by remember { mutableStateOf(false) }
-        var message by remember { mutableStateOf<String?>(null) }
+        var message by remember { mutableStateOf<AppMessage?>(null) }
         var pendingDelete by remember { mutableStateOf<MediaEntry?>(null) }
         var scanning by remember { mutableStateOf(false) }
+        var importing by remember { mutableStateOf(false) }
         var checkingMissing by remember { mutableStateOf(false) }
         var missingEntries by remember { mutableStateOf<List<MediaEntry>?>(null) }
         val notifications = remember { ScanNotifications(applicationContext) }
@@ -126,7 +128,7 @@ class MainActivity : ComponentActivity() {
         val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             notifications.enabled = granted && notifications.allowed()
             notificationsEnabled = notifications.enabled
-            message = if (notificationsEnabled) "تم تفعيل إشعارات الفحص." else "لم يُمنح إذن الإشعارات. يمكن تفعيله من إعدادات الجهاز."
+            message = if (notificationsEnabled) AppMessage("تم تفعيل إشعارات الفحص.", MessageTone.SUCCESS) else AppMessage("لم يُمنح إذن الإشعارات. يمكن تفعيله من إعدادات الجهاز.", MessageTone.ERROR)
         }
         val cloud = remember { CloudRepository(applicationContext) }
         var showCloud by remember { mutableStateOf(false) }
@@ -143,21 +145,21 @@ class MainActivity : ComponentActivity() {
                 try {
                     val operation = if (enable) periodic.enable() else periodic.disable()
                     withContext(Dispatchers.IO) { operation.result.get() }
-                    message = if (enable) "تمت جدولة الفحص التلقائي؛ يحدد النظام وقت التنفيذ." else "تم إيقاف الفحص التلقائي."
+                    message = if (enable) AppMessage("تمت جدولة الفحص التلقائي؛ يحدد النظام وقت التنفيذ.", MessageTone.SUCCESS) else AppMessage("تم إيقاف الفحص التلقائي.")
                 } catch (e: CancellationException) { throw e }
-                catch (_: Exception) { message = "تعذر تحديث جدول الفحص. حاول مجدداً." }
+                catch (_: Exception) { message = AppMessage("تعذر تحديث جدول الفحص. حاول مجدداً.", MessageTone.ERROR) }
                 finally { scheduleChanging = false }
             }
         }
         val periodicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             val access = scanner.access()
             if (access.video || access.audio) changeSchedule(true)
-            else message = "لم يُمنح إذن الوسائط؛ لم تُفعّل الفهرسة التلقائية."
+            else message = AppMessage("لم يُمنح إذن الوسائط؛ لم تُفعّل الفهرسة التلقائية.", MessageTone.ERROR)
         }
         fun startScan() {
             val access = scanner.access()
             if (!access.video && !access.audio) {
-                message = "لم يُمنح إذن الوصول للوسائط. يمكنك منح الإذن من إعدادات التطبيق أو إضافة ملفات يدوياً."
+                message = AppMessage("لم يُمنح إذن الوصول للوسائط. يمكنك منح الإذن من إعدادات التطبيق أو إضافة ملفات يدوياً.", MessageTone.ERROR)
                 return
             }
             scope.launch {
@@ -167,41 +169,56 @@ class MainActivity : ComponentActivity() {
                     val result = scanner.scan(access)
                     notifications.show(result)
                     val scopeNote = if (!access.video || !access.audio || access.limitedVideo) " الفحص يشمل الوسائط المسموح بها فقط." else ""
-                    message = "اكتمل الفحص: ${result.found} ملف، أُضيف منها ${result.added}.$scopeNote"
+                    message = AppMessage("اكتمل الفحص: ${result.found} ملف، أُضيف منها ${result.added}.$scopeNote", MessageTone.SUCCESS)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    message = "تعذر إكمال فحص الوسائط؛ قد تكون بعض الملفات أُضيفت. تحقق من الصلاحيات وحاول مجدداً."
+                    message = AppMessage("تعذر إكمال فحص الوسائط؛ قد تكون بعض الملفات أُضيفت. تحقق من الصلاحيات وحاول مجدداً.", MessageTone.ERROR)
                 } finally { scanning = false }
             }
         }
         fun checkMissing() {
-            if (library !is LibraryState.Ready) { message = "انتظر تحميل المكتبة ثم حاول مجدداً."; return }
+            if (library !is LibraryState.Ready) { message = AppMessage("انتظر تحميل المكتبة ثم حاول مجدداً.", MessageTone.ERROR); return }
             scope.launch {
                 checkingMissing = true
                 try { missingEntries = scanner.findUnavailable(entries) }
                 catch (e: CancellationException) { throw e }
-                catch (_: MediaScanner.FullAccessRequired) { message = "تتطلب المراجعة إذن الوصول الكامل للفيديو والصوت. افتح إعدادات الجهاز واسمح بهما ثم حاول مجدداً." }
-                catch (_: Exception) { message = "تعذرت مراجعة MediaStore؛ لم تُزل أي عناصر. تحقق من الوصول وحاول مجدداً." }
+                catch (_: MediaScanner.FullAccessRequired) { message = AppMessage("تتطلب المراجعة إذن الوصول الكامل للفيديو والصوت. افتح إعدادات الجهاز واسمح بهما ثم حاول مجدداً.", MessageTone.ERROR) }
+                catch (_: Exception) { message = AppMessage("تعذرت مراجعة MediaStore؛ لم تُزل أي عناصر. تحقق من الوصول وحاول مجدداً.", MessageTone.ERROR) }
                 finally { checkingMissing = false }
             }
         }
         val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { startScan() }
-        val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        fun importFiles(uris: List<Uri>) {
+            if (uris.isEmpty()) return
+            if (importing) { message = AppMessage("جارٍ إضافة ملفات أخرى، انتظر حتى تنتهي."); return }
+            importing = true
             scope.launch {
-                val result = repository.importDocuments(uris)
-                message = if (result.failed > 0) "تعذرت إضافة ${result.failed} من الملفات. تحقق من الوصول إليها وحاول مجدداً." else if (result.added > 0) "تمت إضافة الملفات إلى المكتبة." else null
+                try {
+                    val result = repository.importDocuments(uris)
+                    message = if (result.failed > 0) AppMessage(
+                        text = importResultMessage(result.added, result.failed),
+                        tone = MessageTone.ERROR,
+                        actionLabel = "إعادة المحاولة",
+                        onAction = { importFiles(result.failedUris) }
+                    ) else AppMessage(importResultMessage(result.added, 0), MessageTone.SUCCESS)
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) {
+                    message = AppMessage("تعذرت إضافة الملفات. تحقق من الصلاحيات ومساحة التخزين ثم حاول مجدداً.", MessageTone.ERROR, "إعادة المحاولة", onAction = { importFiles(uris) })
+                } finally { importing = false }
             }
         }
+        val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> importFiles(uris) }
         val current = playing
+        Box(Modifier.fillMaxSize()) {
         if (current != null) {
             val stream = isNetworkStream
             BackHandler { playing = null }
             PlayerScreen(this, current, inPip, onBack = { playing = null }, onChooseAnother = { playing = null; picker.launch(arrayOf("video/*", "audio/*")) }, onStarted = {
-                if (!stream) lifecycleScope.launch { try { repository.markPlayed(current.uri, System.currentTimeMillis()) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ سجل التشغيل." } }
+                if (!stream) lifecycleScope.launch { try { repository.markPlayed(current.uri, System.currentTimeMillis()) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = AppMessage("تعذر حفظ سجل التشغيل.", MessageTone.ERROR) } }
             }, onPosition = { position ->
                 // Activity lifecycle scope survives disposal of the player composable.
-                if (!stream) lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = "تعذر حفظ موضع التشغيل." } }
+                if (!stream) lifecycleScope.launch { try { repository.savePosition(current.uri, position) } catch (_: Exception) { message = AppMessage("تعذر حفظ موضع التشغيل.", MessageTone.ERROR) } }
             })
         } else {
             val filtered = remember(entries, query, type, favorites, sort, watchLater, history) { searchLibrary(entries, LibraryQuery(query, type, favorites, sort, watchLater, history)) }
@@ -211,7 +228,7 @@ class MainActivity : ComponentActivity() {
             LazyVerticalGrid(
                 columns = if (gridView) GridCells.Adaptive(230.dp) else GridCells.Fixed(1),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(20.dp),
+                contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -230,7 +247,10 @@ class MainActivity : ComponentActivity() {
                         }
                         Spacer(Modifier.height(12.dp))
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("إضافة ملفات") }
+                            Button(enabled = !importing, onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) {
+                                if (importing) { CircularProgressIndicator(Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)) }
+                                Text(if (importing) "جارٍ الإضافة…" else "إضافة ملفات")
+                            }
                             OutlinedButton(onClick = { favorites = !favorites }) { Text(if (favorites) "كل المكتبة" else "المفضلة") }
                             OutlinedButton(onClick = { watchLater = !watchLater }) { Text(if (watchLater) "إلغاء لاحقاً" else "المشاهدة لاحقاً") }
                             OutlinedButton(onClick = { history = !history; if (history) sort = MediaSort.LAST_PLAYED }) { Text(if (history) "إلغاء السجل" else "سجل التشغيل") }
@@ -253,7 +273,6 @@ class MainActivity : ComponentActivity() {
                             Text("الفلاتر النشطة: ${if (query.isNotBlank()) "بحث · " else ""}${if (type != "all") (if (type == "video") "فيديو · " else "صوتيات · ") else ""}${if (favorites) "المفضلة · " else ""}${if (watchLater) "المشاهدة لاحقاً · " else ""}${if (history) "سجل التشغيل" else ""}", style = MaterialTheme.typography.bodySmall)
                             TextButton(onClick = { query = ""; type = "all"; favorites = false; watchLater = false; history = false }) { Text("مسح البحث والفلاتر") }
                         }
-                        message?.let { Text(it, color = MaterialTheme.colorScheme.primary); TextButton(onClick = { message = null }) { Text("إغلاق الرسالة") } }
                         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                             Box {
                                 TextButton(onClick = { showSort = true }) { Text("الترتيب: ${sort.label}") }
@@ -290,23 +309,25 @@ class MainActivity : ComponentActivity() {
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) { Text("المكتبة", style = MaterialTheme.typography.titleLarge) }
                 when {
-                    library is LibraryState.Loading -> item(span = { GridItemSpan(maxLineSpan) }) { Column { CircularProgressIndicator(); Text("جارٍ تحميل المكتبة…") } }
-                    library is LibraryState.Error -> item(span = { GridItemSpan(maxLineSpan) }) { Column { Text("تعذر تحميل المكتبة. حاول مجدداً.", color = MaterialTheme.colorScheme.error); Button(onClick = { retry++ }) { Text("إعادة المحاولة") } } }
+                    library is LibraryState.Loading -> item(span = { GridItemSpan(maxLineSpan) }) { LibraryLoadingPanel() }
+                    library is LibraryState.Error -> item(span = { GridItemSpan(maxLineSpan) }) { LibraryErrorPanel(onRetry = { retry++ }) }
                     filtered.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                        Column {
-                            Text(if (entries.isEmpty()) "مكتبتك فارغة. أضف ملفات من جهازك للبدء." else "لا توجد ملفات مطابقة للبحث والفلاتر الحالية.")
-                            if (filtersActive) TextButton(onClick = { query = ""; type = "all"; favorites = false; watchLater = false; history = false }) { Text("عرض كل الملفات") }
-                            else if (entries.isEmpty()) TextButton(onClick = { picker.launch(arrayOf("video/*", "audio/*")) }) { Text("اختر ملفات") }
-                        }
+                        LibraryEmptyPanel(hasFilters = filtersActive, onClearFilters = {
+                            query = ""; type = "all"; favorites = false; watchLater = false; history = false
+                        }, onAddFiles = { picker.launch(arrayOf("video/*", "audio/*")) })
                     }
                     else -> items(filtered, key = { it.uri }) { entry ->
                         MediaCard(entry = entry, uploading = uploading, showThumbnails = showThumbnails, onPlay = { isNetworkStream = false; playing = entry },
-                            onFavorite = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر حفظ المفضلة. حاول مجدداً." } } },
-                            onWatchLater = { scope.launch { try { repository.setWatchLater(entry.uri, !entry.watchLater); message = if (entry.watchLater) "أُزيل من المشاهدة لاحقاً." else "أُضيف إلى المشاهدة لاحقاً." } catch (e: CancellationException) { throw e } catch (_: Exception) { message = "تعذر تحديث قائمة المشاهدة لاحقاً. حاول مجدداً." } } },
+                            onFavorite = { scope.launch { try { repository.setFavorite(entry.uri, !entry.favorite); Toast.makeText(applicationContext, if (entry.favorite) "أُزيل من المفضلة" else "أُضيف إلى المفضلة", Toast.LENGTH_SHORT).show() } catch (e: CancellationException) { throw e } catch (_: Exception) { message = AppMessage("تعذر حفظ المفضلة. حاول مجدداً.", MessageTone.ERROR) } } },
+                            onWatchLater = { scope.launch { try { repository.setWatchLater(entry.uri, !entry.watchLater); message = AppMessage(if (entry.watchLater) "أُزيل من المشاهدة لاحقاً." else "أُضيف إلى المشاهدة لاحقاً.", MessageTone.SUCCESS) } catch (e: CancellationException) { throw e } catch (_: Exception) { message = AppMessage("تعذر تحديث قائمة المشاهدة لاحقاً. حاول مجدداً.", MessageTone.ERROR) } } },
                             onDelete = { pendingDelete = entry }, onCloud = { pendingUpload = entry })
                     }
                 }
             }
+        }
+        message?.let { notice ->
+            AppMessageBar(notice, onDismiss = { message = null }, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter))
+        }
         }
         if (showStreamDialog) NetworkStreamDialog(onDismiss = { showStreamDialog = false }, onPlay = { url ->
             showStreamDialog = false
@@ -340,7 +361,7 @@ class MainActivity : ComponentActivity() {
                             if (!enable) { notifications.enabled = false; notificationsEnabled = false }
                             else if (Build.VERSION.SDK_INT >= 33 && !notifications.allowed()) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                             else if (notifications.allowed()) { notifications.enabled = true; notificationsEnabled = true }
-                            else message = "فعّل الإشعارات من إعدادات الجهاز."
+                            else message = AppMessage("فعّل الإشعارات من إعدادات الجهاز.", MessageTone.ERROR)
                         })
                         Text("إشعار عند اكتمال الفحص")
                     }
@@ -377,14 +398,14 @@ class MainActivity : ComponentActivity() {
                                                 if (stillMissing) {
                                                     repository.remove(entry.uri)
                                                     missingEntries = missingEntries?.filterNot { it.uri == entry.uri }
-                                                    message = "أُزيل السجل من المكتبة دون حذف الملف الأصلي."
+                                                    message = AppMessage("أُزيل السجل من المكتبة دون حذف الملف الأصلي.", MessageTone.SUCCESS)
                                                 } else {
                                                     missingEntries = missingEntries?.filterNot { it.uri == entry.uri }
-                                                    message = "أصبح العنصر ظاهراً مجدداً؛ لم تتم إزالته."
+                                                    message = AppMessage("أصبح العنصر ظاهراً مجدداً؛ لم تتم إزالته.")
                                                 }
                                             } catch (e: CancellationException) { throw e }
-                                            catch (_: MediaScanner.FullAccessRequired) { message = "تغيّرت أذونات الوسائط؛ لم يُزل السجل."; missingEntries = null }
-                                            catch (_: Exception) { message = "تعذر التحقق أو إزالة السجل. حاول مجدداً."; missingEntries = null }
+                                            catch (_: MediaScanner.FullAccessRequired) { message = AppMessage("تغيّرت أذونات الوسائط؛ لم يُزل السجل.", MessageTone.ERROR); missingEntries = null }
+                                            catch (_: Exception) { message = AppMessage("تعذر التحقق أو إزالة السجل. حاول مجدداً.", MessageTone.ERROR); missingEntries = null }
                                             finally { checkingMissing = false }
                                         }
                                     }) { Text("إزالة هذا السجل من المكتبة") }
@@ -402,17 +423,17 @@ class MainActivity : ComponentActivity() {
                 confirmButton = { TextButton(onClick = {
                     pendingUpload = null
                     scope.launch {
-                        uploading = true; message = "جارٍ حفظ بيانات الفيديو سحابياً…"
-                        try { cloud.save(entry); message = "تم حفظ بيانات الفيديو سحابياً." }
-                        catch (_: TimeoutCancellationException) { message = "انتهت مهلة الحفظ وقد يكتمل لاحقاً. تحقق من السحابة قبل إعادة المحاولة." }
+                        uploading = true; message = AppMessage("جارٍ حفظ بيانات الفيديو سحابياً…")
+                        try { cloud.save(entry); message = AppMessage("تم حفظ بيانات الفيديو سحابياً.", MessageTone.SUCCESS) }
+                        catch (_: TimeoutCancellationException) { message = AppMessage("انتهت مهلة الحفظ وقد يكتمل لاحقاً. تحقق من السحابة قبل إعادة المحاولة.", MessageTone.ERROR) }
                         catch (e: CancellationException) { throw e }
-                        catch (_: Exception) { message = "تعذر الحفظ السحابي. تحقق من إعداد Firebase والاتصال وقواعد الأمان وحاول مجدداً." }
+                        catch (_: Exception) { message = AppMessage("تعذر الحفظ السحابي. تحقق من إعداد Firebase والاتصال وقواعد الأمان وحاول مجدداً.", MessageTone.ERROR) }
                         finally { uploading = false }
                     }
                 }) { Text("إرسال") } }, dismissButton = { TextButton(onClick = { pendingUpload = null }) { Text("إلغاء") } })
         }
         pendingDelete?.let { entry ->
-            AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك، وقد يظهر مجدداً عند فحص الوسائط.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { repository.remove(entry.uri) } catch (_: Exception) { message = "تعذرت إزالة الملف. حاول مجدداً." } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
+            AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("إزالة من المكتبة؟") }, text = { Text("لن يُحذف الملف الأصلي من جهازك، وقد يظهر مجدداً عند فحص الوسائط.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { try { repository.remove(entry.uri) } catch (_: Exception) { message = AppMessage("تعذرت إزالة الملف. حاول مجدداً.", MessageTone.ERROR) } } }) { Text("إزالة") } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } })
         }
     }
 

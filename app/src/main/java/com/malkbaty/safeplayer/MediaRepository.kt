@@ -15,11 +15,12 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
     val media: Flow<List<MediaEntry>> = dao.observeAll()
     val scanner = MediaScanner(context, dao)
 
-    data class ImportResult(val added: Int, val failed: Int)
+    data class ImportResult(val added: Int, val failed: Int, val failedUris: List<Uri> = emptyList())
 
     suspend fun importDocuments(uris: List<Uri>): ImportResult = withContext(Dispatchers.IO) {
         var added = 0
         var failed = 0
+        val failedUris = mutableListOf<Uri>()
         uris.forEach { uri ->
             try {
                 val resolver = context.contentResolver
@@ -29,7 +30,7 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
                     mime.startsWith("audio/") -> "audio"
                     else -> null
                 }
-                if (kind == null) { failed++; return@forEach }
+                if (kind == null) { failed++; failedUris += uri; return@forEach }
                 resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 var size: Long? = null
                 val title = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
@@ -53,10 +54,11 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
                 throw e
             } catch (_: Exception) {
                 failed++
+                failedUris += uri
             }
         }
         if (uris.isNotEmpty()) ThumbnailLoader.clearIfCreated()
-        ImportResult(added, failed)
+        ImportResult(added, failed, failedUris)
     }
 
     suspend fun markPlayed(uri: String, time: Long) = dao.markPlayed(uri, time)
@@ -72,6 +74,14 @@ class MediaRepository(private val context: Context, private val dao: MediaDao) {
             // MediaStore entries have no persisted document grant.
         }
     }
+}
+
+/** Short result text for the library message bar; keeps success and failure explicit. */
+internal fun importResultMessage(added: Int, failed: Int): String = when {
+    added > 0 && failed == 0 -> "تمت إضافة $added ${if (added == 1) "ملف" else "ملفات"} إلى المكتبة."
+    added > 0 && failed > 0 -> "أُضيف $added وتعذرت إضافة $failed. يمكنك إعادة المحاولة."
+    added == 0 && failed > 0 -> "تعذرت إضافة $failed ${if (failed == 1) "ملف" else "ملفات"}. تحقق من الوصول إليها وحاول مجدداً."
+    else -> "لم يتم اختيار ملفات للإضافة."
 }
 
 enum class MediaSort(val label: String) { NEWEST("الأحدث"), OLDEST("الأقدم"), NAME("الاسم"), DURATION("المدة"), SIZE("الحجم"), LAST_PLAYED("آخر تشغيل") }
